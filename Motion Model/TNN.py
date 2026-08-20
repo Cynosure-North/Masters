@@ -8,9 +8,11 @@ import csv
 import collections
 import matplotlib.pyplot as plt
 import seaborn as sns
+from pathlib import Path
+
+model_path = Path(__file__).parent.parent.joinpath("TNN_weights.pt")
 
 sns.set_theme(style="whitegrid")
-
 device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
 
 # Load marker positions from the files in C:\Users\mno64\Datasets\How we type\Motion Capture and split into training and test sets
@@ -117,8 +119,8 @@ class ResidualTCNBlock(torch.nn.Module):
 	def __init__(self, in_channels, out_channels, kernel_size=2, dilation=3):
 		super().__init__()
 		padding = (kernel_size - 1) * dilation
-		self.conv1 = torch.nn.utils.weight_norm(torch.nn.Conv1d(in_channels, out_channels, kernel_size, dilation=dilation))
-		self.conv2 = torch.nn.utils.weight_norm(torch.nn.Conv1d(out_channels, out_channels, kernel_size, dilation=dilation))
+		self.conv1 = torch.nn.utils.parametrizations.weight_norm(torch.nn.Conv1d(in_channels, out_channels, kernel_size, dilation=dilation))
+		self.conv2 = torch.nn.utils.parametrizations.weight_norm(torch.nn.Conv1d(out_channels, out_channels, kernel_size, dilation=dilation))
 		self.norm1 = torch.nn.GroupNorm(1, out_channels)
 		self.norm2 = torch.nn.GroupNorm(1, out_channels)
 		self.projection = torch.nn.Conv1d(in_channels, out_channels, kernel_size=1) if in_channels != out_channels else None
@@ -242,6 +244,9 @@ def main():
 		test_losses.append(test_loss)
 		print(f"Epoch {t+1} train loss: {epoch_train_loss:.6f}, test loss: {test_loss:.6f}")
 
+	print("Saving model to {model_path}")
+	torch.save(model.state_dict(), model_path)
+
 	plt.figure(figsize=(8, 5))
 	sns.lineplot(x=list(range(1, len(train_losses) + 1)), y=train_losses, label="Training loss", marker="o")
 	sns.lineplot(x=list(range(1, len(test_losses) + 1)), y=test_losses, label="Test loss", marker="s")
@@ -256,14 +261,23 @@ def main():
 if __name__ == "__main__":
 	main()
 
+dataset = KeyPressDataset()
+# TODO: Detmine num_features in advance.
+# num_classes will be 29 (26 letters + space (_) + no-char (-) + end-char (>) )
+model = KeyPressModel(input_features=dataset.num_features, num_classes=len(dataset.vocabulary)).to(device)
+model.load_state_dict(torch.load(model_path, weights_only=True))
+model.eval()
 
+# TODO: Construct model and load weights from file if imported
+
+# TODO: Write the output to Downloaded\tnn.gguf
+
+# TODO: Check this is the architecture used
 # Skeleton to text	- Temporal Convolutional Network (TCN)
 # We follow the TCN architecture proposed by Bai et al. 	https://arxiv.org/pdf/1803.01271
 # which consists of causal dilated convolutions and weight normalization arranged in residual blocks.
 # We use three layers of residual blocks with 64, 64, and 32 hidden units respectively, a kernel 
 # size of 2 and a dilation factor of 3.
-
-# They run it at 60hz
 
 # The input features to the network are frame-to-frame deltas of wrist position and rotation along 
 # with 3D fingertip positions. All positions are represented in the coordinate frame of the keyboard
@@ -276,41 +290,3 @@ if __name__ == "__main__":
 # frames of input data. The output of the network $$ V= \{v_i\}_{i=1}^{T} $$ is a corresponding 
 # sequence of T frames, each containing a probability distribution $$ v_i(k) $$ over the set of
 # the K + 1 possible keys (with one extra for the blank label).
-
-
-
-
-# Language Model
-
-# For our language model, we use a Transformer model similar to the “small-two” model described in https://arxiv.org/pdf/1910.11450
-# with # 4.76M parameters. This language model was trained on using a window of 500 characters on
-# text sampled from 2 million articles in the CC-News dataset [20].
-
-
-
-# Decoder
-# We can do better than greedy decoding by using a prefix beam search decoder.		https://arxiv.org/pdf/1408.2873
-# A prefix beam search decoder approximately maximizes p(W ;V) by incrementally constructing
-# W by tracking a set of B best candidates (beams) at any given step. Furthermore, we can incorporate
-# a joint probability from both the likelihood of the beam according to the motion model p(W ;V) as 
-# well as the likelihood of the compacted text according to a language model $$ p_{lm}(W) $$, i.e.,
-# $$ p_{total} = (p(W;V)p_{lm}(W)^\gamma)^{\frac{1}{1+\gamma}} $$ where γ is a hyperparameter
-# to control the balance between the two likelihoods. This allows the language model to steer
-# decoding when the motion model is uncertain. As has been shown in the speech recognition community,
-# beam search decoding is also well-suited to the CTC loss with which we train the network. We use 
-# a beam search implementation with beam compaction which maximizes the objective
-# $$ W=\text{argmax}_Wp_{total} $$ After decoding, we compute the uncorrected error rate
-# $$ \text{UER}(W,\hat{W}) $$ as the Levenstein edit distance between the decoded and prompted strings
-# divided by the number of characters of the longer of the two strings.
-#
-# https://medium.com/corti-ai/ctc-networks-and-language-models-prefix-beam-search-explained-c11d1ee23306
-
-
-# 1. 2D Motion model
-# :
-# 2. Language model
-# 2a. Find one
-# 2b. Load it
-# 3. Prefix beam search
-# 3a. extract likliehoods from motion model and language model
-# 3b. implement it
