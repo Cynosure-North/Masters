@@ -5,7 +5,7 @@ from llama_cpp import Llama, LogitsProcessorList
 import torch
 
 model_name = "gemma-4-e2b-q4_k_m"
-model_path = Path(__file__).parent.parent.joinpath("Downloaded", model_name + ".gguf")
+model_path = Path(__file__).parent.parent.joinpath("downloaded", model_name + ".gguf")
 
 def load():
 	# Load or pre-calculate non-ASCII token IDs to keep inference fast
@@ -64,7 +64,7 @@ def get_word_probability(prefix, word):		# TODO: Test to make sure this works
 
 
 
-# TODO: This is more complicated than what they use, I should look into a simpler approach
+# TODO: This is more complicated than what they use, I should look into a simpler model
 # For our language model, we use a  model similar to the “small-two” model described in	 https://arxiv.org/pdf/1910.11450
 # with 4.76M parameters. This language model was trained on using a window of 500 characters on text
 # sampled from 2 million articles in the CC-News dataset 

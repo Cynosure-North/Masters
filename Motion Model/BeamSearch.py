@@ -85,7 +85,3 @@ def prefix_beam_search(ctc, lm=None, k=25, alpha=0.30, beta=5, prune=0.001):
 		# END: STEP 7
 
 	return A_prev[0].strip('>')
-
-# https://medium.com/corti-ai/ctc-networks-and-language-models-prefix-beam-search-explained-c11d1ee23306
-
-# TODO: For realtime use I'll need to figure out how to collapse old prefixes
