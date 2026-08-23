@@ -1,3 +1,5 @@
+import editdistance
+
 from LLM import model as llm
 from TNN import model as tnn
 from BeamSearch import prefix_beam_search
@@ -16,29 +18,6 @@ beam_width = 100
 
 # https://medium.com/corti-ai/ctc-networks-and-language-models-prefix-beam-search-explained-c11d1ee23306
 
-def levenshtein_distance(s1: str, s2: str) -> int:
-	# Ensure s1 is the shorter string to optimize memory
-	if len(s1) > len(s2):
-		s1, s2 = s2, s1
-		
-	# Initialize the base distance row (transforming from empty string)
-	previous_row = list(range(len(s1) + 1))
-	
-	# Iterate through characters of the longer string
-	for i, c2 in enumerate(s2):
-		current_row = [i + 1]
-		
-		# Compare with each character of the shorter string
-		for j, c1 in enumerate(s1):
-			insertions = previous_row[j + 1] + 1
-			deletions = current_row[j] + 1
-			substitutions = previous_row[j] + (0 if c1 == c2 else 1)
-			
-			current_row.append(min(insertions, deletions, substitutions))
-			
-		previous_row = current_row
-		
-	return previous_row[-1]
 
 num_incorrect = 0
 total_distance = 0
@@ -48,7 +27,7 @@ incorrect = []
 for phrase in test_data:
 	tnn_prediction = tnn(test_data)
 	pred = prefix_beam_search(tnn_prediction, llm, beam_width, alpha, beta)
-	levenshtein = levenshtein_distance(pred, test_data[phrase])
+	levenshtein = editdistance.eval(pred, test_data[phrase])
 
 	if not pred == test_data[phrase]: num_incorrect += 1
 	total_distance += levenshtein

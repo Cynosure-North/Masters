@@ -1,19 +1,16 @@
 # https://www.ijcai.org/proceedings/2021/0242.pdf
 
-# We propose a novel baseline approach for the IMK decod-
-# ing task. Specifically, taking a sequence of coordinate val-
-# ues as input, we aim to decode a phrase which users in-
-# tended to type on an invisible layout. Let ˆC = { ˆc1, ..., ˆcn}
-# denote a predicted character sequence by the decoding algo-
-# rithm. The decoder aims to find the character sequence, ˆC,
-# with the highest conditional probability given a typing input
-# $$ T = \{t_1, t_2, ..., t_n\} $$, as follows (equation 2)
+# We propose a novel baseline approach for the IMK decoding task. Specifically, taking a sequence of
+# coordinate values as input, we aim to decode a phrase which users intended to type on an invisible
+# layout. Let $$ \hat{C} = \{ \hat{c_1}, ..., \hat{c_n}\} $$ denote a predicted character sequence by the decoding algorithm. The
+# decoder aims to find the character sequence, $$ \hat{C} $$, with the highest conditional probability given a
+# typing input $$ T = \{t_1, t_2, ..., t_n\} $$, as follows (equation 2)
 
 # $$ \mathbb{\hat{C}} = argmax(P(\hat{c_1}, ..., \hat{c_n}|t_1, ..., t_n)) $$
 
 # Our baseline approach, Self-Attention Neural Character Decoder (SA-NCD), consists of two decoder
-# modules: 1) a geometric decoder (G) with its parameters φG and 2) a semantic decoder (S) with its
-# parameters φS . For an input sequence $$ X = \{x_1, x_2, ..., x_n\} $$, let $$ G(X; \phi G) $$ and $$ S(X; \phi S) $$ denote the
+# modules: 1) a geometric decoder (G) with its parameters $$ \phi G $$ and 2) a semantic decoder (S) with its
+# parameters $$ \phi S $$. For an input sequence $$ X = \{x_1, x_2, ..., x_n\} $$, let $$ G(X; \phi G) $$ and $$ S(X; \phi S) $$ denote the
 # output from the geometric decoder and the semantic decoder, respectively. The geometric decoder
 # takes in a touch input sequence and converts it into a character sequence by using the touch
 # locations in the invisible keyboard layout. Then, the semantic decoder corrects decoding errors in
@@ -36,9 +33,11 @@
 # Confidence Masking
 # The length of $$ G(X; \phi_G) = \{o_1, o_2, ..., o_n\} $$ is the same as the input length, and each element has the
 # dimension size of the vocabulary size (v). When considering the i-th input $$ (1 \le i \le n) $$ from a
-# sequence, the probability (confidence) of the k-th character in the vocabulary, pk i , can be
+# sequence, the probability (confidence) of the k-th character in the vocabulary, $$ p_i^k $$, can be
 # calculated by the softmax function as follows:
+
 # $$ \text{Softmax}(G(X; \phi_G)) = \{(p_i^1 , p_i^2, ..., p_i^v)\}_{i=1}^n $$
+
 # with
 
 # $$ p_i^k = \frac{exp(o_i^k)}{\sigma_{j=1}^v exp(o_i^j)} $$
@@ -51,9 +50,10 @@
 # process and the individual masking function as follows:
 
 # $$ CM ({x_1, ..., x_n}) = {Mask(x_1), ..., Mask(x_n)} $$
+
 # with
-# $$ Mask(x_i) = \begin{cases} Embed(argmax p_i^j) & \text{if } max(p_j^i) \ge \tau \\ 
-# 							Embed(j_{[mask]}) & \text{otherwise} \end{cases} $$
+
+# $$ Mask(x_i) = \begin{cases} Embed(argmax p_i^j) & \text{if } max(p_j^i) \ge \tau \\ Embed(j_{[mask]}) & \text{otherwise} \end{cases} $$
 
 # where $$ x_i = (p_i^1, p_i^2, ..., p_i^v) $$ and $$ j_{[mask]} $$ is the index of mask token. $$ \text{Embed} $$ is an embedding layer which
 # encodes index to an embedded vector.
@@ -63,8 +63,8 @@
 # has passed the geometric decoder followed by confidence masking is processed by the semantic decoder
 # with the self-attention mechanism of Transformer. Here, the semantic decoder acts as a character
 # language model, replacing the masked characters with appropriate characters. Through the proposed
-# network architecture, the decoded character sequence $$ \mathbb{\hat{C}} $$ in Equation (2) can be expressed as fol-
-# lows: $$ \mathbb{\hat{C}} = \text{Softmax}(G(X; \phi_G))); \phi_S $$
+# network architecture, the decoded character sequence $$ \mathbb{\hat{C}} $$ in Equation 2 can be expressed as follows:
+# $$ \mathbb{\hat{C}} = S(CM(\text{Softmax}(G(X; \phi_G))); \phi_S) $$
 
 # Training Scheme
 # We pre-train both the geometric decoder and the semantic decoder to enhance their respective roles.
@@ -74,7 +74,7 @@
 # $$ G(X; \phi G) $$ while freezing $$ \phi S $$ repeatedly.
 
 # Implementation Details
-# We optimized φG with SGD update, with the learning rate of 3.0 and gradient clipping at 0.5. For $$ \phi S $$,
+# We optimized $$ \phi G $$ with SGD update, with the learning rate of 3.0 and gradient clipping at 0.5. For $$ \phi S $$,
 # we used the Adam optimizer with learning rate 1e-4. Threshold $$ \tau $$ for confidence masking was 0.45 and
 # the vocabulary size v was 31. We minimized Cross-entropy loss to optimize the parameters. In
 # addition, to quickly propagate information within the network, we employed the auxiliary losses for
