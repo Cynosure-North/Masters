@@ -1,5 +1,3 @@
 /.vscode
-/mlruns
-mlflow.db
 *.pyc
 *.gguf

@@ -84,7 +84,6 @@ class DataVariableLength(Dataset):
     """
     def __init__(self, csv_path, min_length=13, full_sentence=False, augment=False):
         df = pd.read_csv(csv_path)
-        print(df)
         self.full_sentence = full_sentence
         self.min_length = min_length
         data_file = df[df['length'] >= self.min_length]

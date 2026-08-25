@@ -80,7 +80,7 @@ class TrainOptions(BaseOptions):
                                  help="if True, make artificial typos for each character depending on nearest positions on the physical keyboard")
 
         # Embedding size
-        self.parser.add_argument('--char_embed_size', default=128, help="char embedding dimension")
+        self.parser.add_argument('--char_embed_size', default=0, help="char embedding dimension")
         self.parser.add_argument('--feat_size', default=4,
                                  help="final feature size of seperate path before softmax decoding")
 
