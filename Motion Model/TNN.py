@@ -3,10 +3,9 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-from dataset import KeyPressDataset
+import dataset as KPdataset
 
 model_path = Path(__file__).parent.parent.joinpath("downloaded", "TNN_weights.pt")
-
 sns.set_theme(style="whitegrid")
 device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
 
@@ -70,15 +69,6 @@ class KeyPressModel(torch.nn.Module):
 		return self.output_projection(x)
 
 
-def collate_batch(batch):
-	features, targets, target_lengths = zip(*batch)
-	padded_features = torch.nn.utils.rnn.pad_sequence(features, batch_first=True)
-	padded_targets = torch.nn.utils.rnn.pad_sequence(targets, batch_first=True, padding_value=0)
-	input_lengths = torch.tensor([x.size(0) for x in features], dtype=torch.long)
-	target_lengths = torch.tensor(target_lengths, dtype=torch.long)
-	return padded_features, padded_targets, input_lengths, target_lengths
-
-
 def train(dataloader, model, loss_fn, optimizer):
 	size = len(dataloader.dataset)
 	model.train()
@@ -103,7 +93,6 @@ def train(dataloader, model, loss_fn, optimizer):
 
 
 def test(dataloader, model, loss_fn):
-	size = len(dataloader.dataset)
 	num_batches = len(dataloader)
 	model.eval()
 	test_loss = 0.0
@@ -118,13 +107,10 @@ def test(dataloader, model, loss_fn):
 
 
 def main():
-	dataset = KeyPressDataset()
-	train_data, test_data = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.8), len(dataset) - int(len(dataset) * 0.8)])
-	train_loader = torch.utils.data.DataLoader(train_data, batch_size=4, shuffle=True, num_workers=0, collate_fn=collate_batch)
-	test_loader = torch.utils.data.DataLoader(test_data, batch_size=4, shuffle=False, num_workers=0, collate_fn=collate_batch)
+	train_loader = KPdataset.train_loader
+	test_loader = KPdataset.test_loader
 
-	device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
-	model = KeyPressModel(input_features=dataset.num_features, num_classes=len(dataset.vocabulary)).to(device)
+	model = KeyPressModel(input_features=KPdataset.dataset.num_features, num_classes=len(KPdataset.dataset.vocabulary)).to(device)
 
 	loss_fn = torch.nn.CTCLoss(blank=0)
 	optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -157,10 +143,9 @@ def main():
 if __name__ == "__main__":
 	main()
 
-dataset = KeyPressDataset()
 # TODO: Determine num_features in advance.
 # num_classes will be 29 (26 letters + space (_) + no-char (-) + end-char (>) )
-model = KeyPressModel(input_features=dataset.num_features, num_classes=len(dataset.vocabulary)).to(device)
+model = KeyPressModel(input_features=KPdataset.dataset.num_features, num_classes=len(KPdataset.dataset.vocabulary)).to(device)
 model.load_state_dict(torch.load(model_path, weights_only=True))
 model.eval()
 

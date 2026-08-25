@@ -2,27 +2,18 @@ import os
 import glob
 import csv
 import torch
-import collections
 from pathlib import Path
 import numpy as np
 import pandas as pd
 
 data_folder = Path(__file__).parent.parent.joinpath("data")
 
-# Load marker positions from the files in C:\Users\mno64\Datasets\How we type\Motion Capture and split into training and test sets
-# files are in the format 005307_sentences_mocap_matched.csv
-# they are tsv files, despite the extension
-# the columns are uid	condition	time	stimulus_index	input_index	iki	input	key_symbol	stimulus	typed	finger	right_hand	Hands_L_Cout_x	Hands_L_Cout_y	Hands_L_Cout_z	Hands_R_Cout_x	Hands_R_Cout_y	Hands_R_Cout_z	Hands_L_R2_x	Hands_L_R2_y	Hands_L_R2_z	Hands_L_M1_x	Hands_L_M1_y	Hands_L_M1_z	Hands_L_I1_x	Hands_L_I1_y	Hands_L_I1_z	Hands_L_Cin_x	Hands_L_Cin_y	Hands_L_Cin_z	Hands_L_R1_x	Hands_L_R1_y	Hands_L_R1_z	Hands_L_L1_x	Hands_L_L1_y	Hands_L_L1_z	Hands_L_L2_x	Hands_L_L2_y	Hands_L_L2_z	Hands_L_Aout_x	Hands_L_Aout_y	Hands_L_Aout_z	Hands_L_I2_x	Hands_L_I2_y	Hands_L_I2_z	Hands_R_L2_x	Hands_R_L2_y	Hands_R_L2_z	Hands_L_M2_x	Hands_L_M2_y	Hands_L_M2_z	Hands_L_T2_x	Hands_L_T2_y	Hands_L_T2_z	Hands_R_R3_x	Hands_R_R3_y	Hands_R_R3_z	Hands_L_I3_x	Hands_L_I3_y	Hands_L_I3_z	Hands_L_R4_x	Hands_L_R4_y	Hands_L_R4_z	Hands_L_T1_x	Hands_L_T1_y	Hands_L_T1_z	Hands_L_R3_x	Hands_L_R3_y	Hands_L_R3_z	Hands_L_M4_x	Hands_L_M4_y	Hands_L_M4_z	Hands_L_L4_x	Hands_L_L4_y	Hands_L_L4_z	Hands_L_L3_x	Hands_L_L3_y	Hands_L_L3_z	Hands_L_M3_x	Hands_L_M3_y	Hands_L_M3_z	Hands_R_Win_x	Hands_R_Win_y	Hands_R_Win_z	Hands_R_Cin_x	Hands_R_Cin_y	Hands_R_Cin_z	Hands_R_L1_x	Hands_R_L1_y	Hands_R_L1_z	Hands_L_Win_x	Hands_L_Win_y	Hands_L_Win_z	Hands_L_Wout_x	Hands_L_Wout_y	Hands_L_Wout_z	Hands_R_I1_x	Hands_R_I1_y	Hands_R_I1_z	Hands_L_Ain_x	Hands_L_Ain_y	Hands_L_Ain_z	Hands_R_I2_x	Hands_R_I2_y	Hands_R_I2_z	Hands_R_L3_x	Hands_R_L3_y	Hands_R_L3_z	Hands_R_R2_x	Hands_R_R2_y	Hands_R_R2_z	Hands_R_R1_x	Hands_R_R1_y	Hands_R_R1_z	Hands_R_M3_x	Hands_R_M3_y	Hands_R_M3_z	Hands_R_Wout_x	Hands_R_Wout_y	Hands_R_Wout_z	Hands_R_Ain_x	Hands_R_Ain_y	Hands_R_Ain_z	Hands_R_T2_x	Hands_R_T2_y	Hands_R_T2_z	Hands_R_T3_x	Hands_R_T3_y	Hands_R_T3_z	Hands_R_T1_x	Hands_R_T1_y	Hands_R_T1_z	Hands_R_M1_x	Hands_R_M1_y	Hands_R_M1_z	Hands_R_M2_x	Hands_R_M2_y	Hands_R_M2_z	Hands_R_Aout_x	Hands_R_Aout_y	Hands_R_Aout_z	Hands_R_M4_x	Hands_R_M4_y	Hands_R_M4_z	Hands_R_L4_x	Hands_R_L4_y	Hands_R_L4_z	Hands_R_R4_x	Hands_R_R4_y	Hands_R_R4_z	Hands_L_I4_x	Hands_L_I4_y	Hands_L_I4_z	Hands_L_T4_x	Hands_L_T4_y	Hands_L_T4_z	Hands_R_I3_x	Hands_R_I3_y	Hands_R_I3_z	Hands_R_T4_x	Hands_R_T4_y	Hands_R_T4_z	Hands_R_I4_x	Hands_R_I4_y	Hands_R_I4_z	Hands_L_T3_x	Hands_L_T3_y	Hands_L_T3_z
-# I will need key symbol and the columns from Hands_L_Cout_x to the right
+generator = torch.Generator()
+generator.seed(1234567890)
 
 class KeyPressDataset(torch.utils.data.Dataset):
-	def __init__(self, data_dir="C:\\Users\\mno64\\Datasets\\How we type\\Motion Capture", min_seq_len=8):
-		def default():
-			return "Float32"
-		types = collections.defaultdict(default)
-		types["input_index"] = pd.Int64Dtype()
+	def __init__(self, min_seq_len=8):
 
-		self.data_dir = data_dir
 		self.text_column = "typed"
 		self.feature_columns = [
 			"Hands_L_Cout_x", "Hands_L_Cout_y", "Hands_L_Cout_z",
@@ -34,9 +25,9 @@ class KeyPressDataset(torch.utils.data.Dataset):
 			"Hands_L_Win_x", "Hands_L_Win_y", "Hands_L_Win_z",
 			"Hands_R_Win_x", "Hands_R_Win_y", "Hands_R_Win_z",
 		]
-		files = sorted(glob.glob(os.path.join(data_dir, "*.csv")))
+		files = sorted(glob.glob(os.path.join(data_folder, "*.csv")))
 		if not files:
-			raise FileNotFoundError(f"No CSV files found in {data_dir}")
+			raise FileNotFoundError(f"No CSV files found in {data_folder}")
 
 		use_cols = ["uid", "condition", "stimulus", "input_index", "time", self.text_column] + self.feature_columns
 		frames = []
@@ -82,11 +73,17 @@ class KeyPressDataset(torch.utils.data.Dataset):
 		encoded = torch.tensor([self.char_to_index.get(char, self.char_to_index["<unk>"]) for char in target_text], dtype=torch.long)
 		return torch.from_numpy(features).float(), encoded, torch.tensor(len(encoded), dtype=torch.long)
 
-# TODO: load dataset into numpy array (or other appropriate format)
-# TODO: Deterministically split out the test data
-# Could be easiest to randomly split on import and put them in different folders
 
-test_data = ()
+def collate_batch(batch):
+	features, targets, target_lengths = zip(*batch)
+	padded_features = torch.nn.utils.rnn.pad_sequence(features, batch_first=True)
+	padded_targets = torch.nn.utils.rnn.pad_sequence(targets, batch_first=True, padding_value=0)
+	input_lengths = torch.tensor([x.size(0) for x in features], dtype=torch.long)
+	target_lengths = torch.tensor(target_lengths, dtype=torch.long)
+	return padded_features, padded_targets, input_lengths, target_lengths
 
-# Format
-# particpant_id	timestamp	phrase_id	phrase	...hand positions
+
+dataset = KeyPressDataset()
+train_data, test_data = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.8), len(dataset) - int(len(dataset) * 0.8)], generator=generator)
+train_loader = torch.utils.data.DataLoader(train_data, batch_size=4, shuffle=True, num_workers=0, collate_fn=collate_batch)
+test_loader = torch.utils.data.DataLoader(test_data, batch_size=4, shuffle=False, num_workers=0, collate_fn=collate_batch)

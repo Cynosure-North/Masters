@@ -1,4 +1,4 @@
-import editdistance
+import editdistance # pyright: ignore[reportMissingModuleSource]
 
 from LLM import model as llm
 from TNN import model as tnn
