@@ -2,13 +2,8 @@ import torch
 import torch.nn as nn
 from data import chars
 import torch.optim as optim
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-from transformers import BertTokenizer, BertModel, BertConfig, BertForMaskedLM
-from transformers.modeling_bert import BertOnlyMLMHead
-from utils import load_model, evaluate, save_model
-from options import TrainOptions
-import utils
-from torch.nn import init
+from transformers import BertConfig
+from utils import load_model, save_model
 import time
 from test import test_
 import copy

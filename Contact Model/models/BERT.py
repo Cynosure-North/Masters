@@ -46,7 +46,7 @@ class BERT(nn.Module):
 
 
 def train_(predictor, dataloader_train, criterion, args, device, dataloader_val, save_path):
-    min_val_loss, max_acc, count, best_model = 100, 0, 0, copy.deepcopy(predictor.state_dict())
+    _min_val_loss, max_acc, count, best_model = 100, 0, 0, copy.deepcopy(predictor.state_dict())
     optimizer = optim.Adam(predictor.parameters(), lr=args.lr)
     # optimizer = optim.RMSprop(self.parameters(), lr=args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.step_lr, gamma=0.95)
@@ -95,10 +95,8 @@ def train_(predictor, dataloader_train, criterion, args, device, dataloader_val,
         if epoch == args.intermediate_stop:
             predictor.intermediate = False
 
-        if args.train_data == './data/1BW_english.txt':
-            print("=> saving checkpoints '{}'".format(save_path.replace('.pth', str(epoch + 1) + '.pth')))
-            save_model(best_model, save_path)
-
+        print("=> saving checkpoints '{}'".format(save_path.replace('.pth', str(epoch + 1) + '.pth')))
+        save_model(best_model, save_path)
         if val_acc < max_acc:
             count += 1
             if count > 5:

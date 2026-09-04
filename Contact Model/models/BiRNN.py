@@ -3,13 +3,12 @@ import torch.nn as nn
 from data import chars
 import torch.optim as optim
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-from utils import load_model, evaluate, save_model
+from utils import save_model
 from torch.nn import init
 import time
 from test import test_
 import copy
 from torch.nn import DataParallel
-from transformers import BertModel, BertConfig
 
 
 class BidirectionalRNN(nn.Module):
