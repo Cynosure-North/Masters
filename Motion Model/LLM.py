@@ -68,3 +68,5 @@ def get_word_probability(prefix, word):		# TODO: Test to make sure this works
 # For our language model, we use a  model similar to the “small-two” model described in	 https://arxiv.org/pdf/1910.11450
 # with 4.76M parameters. This language model was trained on using a window of 500 characters on text
 # sampled from 2 million articles in the CC-News dataset 
+
+# https://www.google.com/search?hl=en&q=training+dataset+for+masked+character+lm&udm=50&mstk=AUtExfAaS7peDDb5Kz-smGvmJXFBA85jMCAUCyL38hLCjx8z_NJ5lxA2snjAXKltIbwERVaEDJtXqRVbTn7HbX4feiiw3oijyGkyEeNDB6OszfZgrOGBgI_smTO4FQ3V7bYRhz0M_Tn9WWLnVL6k0l7YIckxqPDhCPr82JU&aioh=3&csuir=1&atvm=2&mtid=blaOao3XI72hseMP67Gy4AM
