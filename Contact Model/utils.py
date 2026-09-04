@@ -1,11 +1,9 @@
 import torch
-from data import get_diff
 import editdistance
 import re
 from data import chars
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+from torch.nn.utils.rnn import pack_padded_sequence
 import matplotlib.pyplot as plt
-from matplotlib import pylab
 import numpy as np
 
 
@@ -39,9 +37,6 @@ def bashRun(args):
 
     if type(args.epoch) is str:
         args.epoch = int(args.epoch)
-
-    if type(args.case) is str:
-        args.case = int(args.case)
 
     if type(args.nhid) is str:
         args.nhid = int(args.nhid)

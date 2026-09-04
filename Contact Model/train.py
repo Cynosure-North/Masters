@@ -19,34 +19,26 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     if args.bigru:
-        if args.bert:
-            predictor = BiRNNLinearBert.RNNLinearBERT(gru_stack_bert=args.gru_stack_bert, args=args).to(device)
-        else:
-            predictor = BiRNN.BidirectionalRNN(char_embed_size=args.char_embed_size, nhid=args.nhid, nlayer=args.nlayers,
-                                               rnn_type='GRU').to(device)
-            model_name = 'BiRNN'
+        predictor = BiRNN.BidirectionalRNN(char_embed_size=args.char_embed_size, nhid=args.nhid, nlayer=args.nlayers,
+                                           rnn_type='GRU').to(device)
+        model_name = 'BiRNN'
+
+        train_data ='./data/data_normalized/data_train.csv'
+        val_data ='./data/data_normalized/data_val.csv'
+        test_data ='./data/data_normalized/data_test.csv'
 
     elif args.bert:
-        if args.masked_LM:
-            args.train_data = './data/Masked_CLM/1BW_LM.csv'
-            args.val_data = './data/data_train.csv'
-            model_name = 'BERT'
-        else:
-            args.custom_input = True
-            model_name = 'BERT'
         predictor = BERT.BERT(args=args).to(device)
 
-    elif args.ikeyboard:
-        predictor = IKeyboard.Ikeyboard(args=args)
-        model_name = 'IKeyboard'
+        train_data = r"C:\Users\mno64\Datasets\1-billion-word-benchmark\training-monolingual.tokenized.shuffled\processed.csv"
+        val_data ='./data/data_normalized/data_val.csv'
+        test_data = val_data
 
     elif args.sa_ncd:
         predictor = SANCD.SANCD(args=args).to(device)
         model_name = 'SANCD'
 
-    else:
-        predictor = ShortTermMLP.ShortTermDecoder().to(device)
-        model_name = 'ShortTermMLP'
+        # TODO: data paths
 
     save_path = '{}_h{}_n{}_{}.pth'.format(model_name, str(args.nhid), args.nlayers, 'MLM' if args.masked_LM else '')
 
@@ -56,15 +48,9 @@ if __name__ == "__main__":
         predictor = predictor.to(device)
 
 
-    dataloader_train = data.get_dataloader(args.train_data, batch_size=args.batch_size, min_length=args.length,
-                                           various=args.various_length, full_sentence=True,
-                                           augment=args.augment, masked_LM=args.masked_LM)
-    dataloader_val = data.get_dataloader(args.val_data, batch_size=args.batch_size, min_length=args.length,
-                                         various=args.various_length, full_sentence=args.full_sentence,
-                                         augment=args.augment, masked_LM=args.masked_LM, inference=True)
-    dataloader_test = data.get_dataloader(args.test_data, batch_size=args.batch_size, min_length=args.length,
-                                          various=args.various_length, full_sentence=args.full_sentence, augment=False,
-                                          masked_LM=args.masked_LM, inference=True)
+    dataloader_train = data.get_dataloader(args.train_data, batch_size=args.batch_size, masked_LM=args.masked_LM)
+    dataloader_val = data.get_dataloader(args.val_data, batch_size=args.batch_size, test=True, masked_LM=args.masked_LM)
+    dataloader_test = data.get_dataloader(args.test_data, batch_size=args.batch_size, test=True, masked_LM=args.masked_LM)
 
     criterion = nn.CrossEntropyLoss(ignore_index=0)
     best_model = getattr(eval(model_name), 'train_')(predictor, dataloader_train, criterion, args, device, dataloader_val, save_path=save_path)

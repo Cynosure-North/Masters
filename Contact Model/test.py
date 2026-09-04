@@ -1,15 +1,12 @@
-import logging
 from options import TrainOptions
-import random
 import utils
 import torch.nn as nn
 from utils import load_model, idx2chars
 import torch
 from data import get_dataloader
 import matplotlib.pyplot as plt
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+from torch.nn.utils.rnn import pack_padded_sequence
 from utils import wer
-# from models import BiRNN
 
 
 def test_(args, predictor, best_model, dataloader_test, load_path=None, print_count=False):
@@ -47,13 +44,9 @@ def test_(args, predictor, best_model, dataloader_test, load_path=None, print_co
                 output, prev_outputs = predictor(x_batch, input_len, masked_LM=args.masked_LM)
             else:
                 output = predictor(x_batch, input_len)
-            if args.ikeyboard:
-                output = output[1].permute(0, 2, 1)
-                _, top_k = torch.topk(output, 3, dim=1)
-                top1_predicted = top_k[:, 0, :]
-            else:
-                _, top_k = torch.topk(output, 3, dim=1)
-                top1_predicted = top_k[:, 0, :]
+
+            _, top_k = torch.topk(output, 3, dim=1)
+            top1_predicted = top_k[:, 0, :]
 
             loss = criterion(output, y_batch)
 
@@ -107,21 +100,3 @@ def test_(args, predictor, best_model, dataloader_test, load_path=None, print_co
         w_error = float(distance_sum / length_sum) * 100
 
     return avg_loss, accuracy, w_error
-
-
-if __name__ == "__main__":
-    args = TrainOptions().parse()
-    args = utils.bashRun(args)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    DataLoader = get_dataloader(args.test_data, batch_size=args.batch_size, min_length=args.length,
-                                various=args.various_length, full_sentence=args.full_sentence)
-
-
-    predictor = BiRNN.BidirectionalRNN(char_embed_size=args.char_embed_size, nhid=256, nlayer=6, rnn_type='GRU').to(device)
-
-    save_path = './checkpoints/BiRNN256_6_5.pth'
-
-    loss, acc, w_error = test_(args, predictor, None, DataLoader, load_path=save_path)
-    print(acc)
-    print(w_error)

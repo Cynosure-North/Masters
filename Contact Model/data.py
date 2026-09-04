@@ -6,7 +6,8 @@ import numpy as np
 import random
 from random import randint
 from torch.nn.utils.rnn import pad_sequence
-import math
+import csv
+import ast
 
 np.random.seed(1)
 random.seed(1)
@@ -14,67 +15,6 @@ chars = ['[PAD]', '[MASK]', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k
          'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', ' ', '.']
 char_to_idx = {ch: i for i, ch in enumerate(chars)}
 idx_to_char = {i: ch for i, ch in enumerate(chars)}
-
-
-class DataFixedLength(Dataset):
-    """Data loader for the short-term decoder.
-    DataShorTerm parses the raw data and extracts the following pairs:
-    (input_1, input_2, input_3, gt_char_1, gt_char_2, gt_char_3).
-    """
-
-    def __init__(self, csv_path, interval=False, length=3):
-        df = pd.read_csv(csv_path)
-        self.relative = True
-        self.length = length
-        self.dataset_input, self.dataset_label = self.preprocessing(df, interval=interval)
-
-    def preprocessing(self, csv_data, interval=False):
-        total_input = []
-        total_label = []
-        sentence_column = csv_data['sentence']
-        x_column, y_column = csv_data['x_list'], csv_data['y_list']
-        width_column, height_column = csv_data['width'], csv_data['height']
-        # time_column = csv_data['time']
-        for sentence, x_list, y_list, width, height in zip(sentence_column, x_column, y_column,
-                                                           width_column, height_column):
-
-            sentence_list = list(sentence)
-            normalized_x_list = [float(x) / width for x in x_list.split(',')]
-            normalized_y_list = [float(y) / height for y in y_list.split(',')]
-            width_list = len(sentence_list) * [width / 1000]
-            # print("width list is", width_list)
-            height_list = len(sentence_list) * [height / 1000]
-            # print("height list is", height_list)
-
-            if len(normalized_x_list) != len(normalized_y_list):
-                print("Error!! x and y different lengths!")
-
-            if len(sentence_list) != len(normalized_y_list):
-                print("Error! sentence and y have different lengths!")
-            full_length = len(sentence_list)
-
-            one_input = []
-            for i, char in enumerate(sentence_list):
-                if i < full_length - self.length - 1:
-                    one_input = [width_list[0]] + [height_list[0]]
-                    if interval:
-                        three_x = normalized_x_list[i:i + self.length]
-                        three_y = normalized_y_list[i:i + self.length]
-                        one_input = one_input + three_x + three_y + get_diff(three_x) + get_diff(three_y)
-                    else:
-                        one_input = one_input + normalized_x_list[i:i + self.length] + normalized_y_list[i:i + self.length]
-
-                    one_label = [char_to_idx[character] for character in sentence_list[i:i + 3]]
-                total_input.append(one_input)
-                total_label.append(one_label)
-
-        return np.array(total_input), np.array(total_label)
-
-    def __len__(self):
-        return self.dataset_input.shape[0]
-
-    def __getitem__(self, idx):
-        return self.dataset_input[idx], np.array(self.dataset_label[idx])
 
 
 class DataVariableLength(Dataset):
@@ -155,154 +95,101 @@ class DataVariableLength(Dataset):
         return self.data_length
 
 
-class MaskedLM(Dataset):
+class MaskedLM(IterableDataset):
     """Data loader for the long-term decoder.
     DataLongTerm parses the raw data and extracts
     (seq. of user input, g.t. seq. of characters) pairs of each full sentence.
 
     """
-    def __init__(self, csv_path, min_length=13, full_sentence=False, inference=False):
-        df = pd.read_csv(csv_path)
-        self.full_sentence = full_sentence
-        self.min_length = min_length
-        data_file = df[df['length'] >= self.min_length]
-        self.df = data_file
-        self.data_length = self.df.shape[0]
-        self.inference = inference
-
-    def process_csv(self, data, idx):
-        one_sample = data.iloc[idx]
-        if self.full_sentence:
-            cropped_chars = one_sample['sentence']
-        else:
-            selected_length = random.randint(self.min_length, one_sample['length'])
-            cropped_chars = one_sample['sentence'][0:selected_length]
-        masked_sentence = []
-        label = []
-        mask = []
-        full_label = []
-        for char in cropped_chars:
-            if char not in chars:
-                masked_sentence += [0]
-                label += [0]
-                mask += [0]
-            else:
-                prob = random.random()
-                if prob < 0.85:
-                    masked_sentence += [char_to_idx[char]]
-                    if self.inference:
-                        label += [char_to_idx[char]]
-                        mask += [1]
-                    else:
-                        label += [0]
-                        mask += [0]
-                elif prob < 0.97:
-                    masked_sentence += [char_to_idx['[MASK]']]
-                    label += [char_to_idx[char]]
-                    mask += [1]
-                elif prob < 0.985:
-                    masked_sentence += [randint(0, len(chars) - 1)]
-                    label += [char_to_idx[char]]
-                    mask += [1]
-                else:
-                    masked_sentence += [char_to_idx[char]]
-                    label += [char_to_idx[char]]
-                    mask += [1]
-
-                # if prob < 0.85:
-                #     masked_sentence += [char_to_idx[char]]
-                #     if self.inference:
-                #         label += [char_to_idx[char]]
-                #         mask += [1]
-                #     else:
-                #         label += [0]
-                #         mask += [0]
-                # elif prob < 0.985:
-                #     masked_sentence += [randint(0, len(chars) - 1)]
-                #     label += [char_to_idx[char]]
-                #     mask += [1]
-                # else:
-                #     masked_sentence += [char_to_idx[char]]
-                #     label += [char_to_idx[char]]
-                #     mask += [1]
-
-                full_label += [char_to_idx[char]]
-
-        masked_char = torch.tensor(masked_sentence)
-        label = torch.tensor(label)
-        mask = torch.tensor(mask)
-        full_label = torch.tensor(full_label)
-
-        return masked_char, label, mask, full_label
-
-    def __getitem__(self, idx):
-        data_arr, label, mask, full_label = self.process_csv(self.df, idx)
-        return data_arr, label, mask, full_label
-
-    def __len__(self):
-        return self.data_length
-
-
-class Masked1BW(IterableDataset):
-    """Data loader for the long-term decoder.
-    DataLongTerm parses the raw data and extracts
-    (seq. of user input, g.t. seq. of characters) pairs of each full sentence.
-
-    """
-    def __init__(self, csv_path, min_length=13, full_sentence=False, inference=False):
-        self.filename = csv_path
-        self.full_sentence = full_sentence
+    def __init__(self, file_path, min_length=13, full_sentence=False, inference=False,
+                 max_length=512):
+        self.file_path = file_path
         self.min_length = min_length
         self.inference = inference
+        self.max_length = max_length
 
+    # TODO: I need to figure out how to use dataloaders more effectively, to avoid loading the entire dataset into memory, although maybe that is possible
+    # TODO: I should also figure out whether to store the tensorised or untensorised data
+    @staticmethod
+    def process(read_path, write_path, min_length=13, full_sentence=False, inference=False):
+        with open(read_path, 'r', encoding='utf-8') as input_file, open(write_path, 'a', newline='') as output_file:
+            writer = csv.writer(output_file, quoting=csv.QUOTE_ALL)
+            for line in input_file:
+                if len(line) < min_length:
+                    continue
 
-    def line_mapper(self, one_sample):
-        if self.full_sentence:
-            cropped_chars = one_sample
-        else:
-            if len(one_sample) < self.min_length:
-                selected_length = len(one_sample)
-            else:
-                selected_length = random.randint(self.min_length, len(one_sample))
-                if selected_length > 200:
-                    selected_length = 200
-            cropped_chars = one_sample[0:selected_length]
-        masked_sentence = []
-        label = []
-        for char in cropped_chars:
-            if char not in chars:
-                char = '[UNK]'
-                masked_sentence += [char_to_idx[char]]
-                label += [0]
-            else:
-                prob = random.random()
-                if prob < 0.85:
-                    masked_sentence += [char_to_idx[char]]
-                    if self.inference:
-                        label += [char_to_idx[char]]
-                    else:
-                        label += [0]
-                elif prob < 0.97:
-                    masked_sentence += [char_to_idx['[MASK]']]
-                    label += [char_to_idx[char]]
-                elif prob < 0.985:
-                    masked_sentence += [randint(0, len(chars) - 1)]
-                    label += [char_to_idx[char]]
+                if full_sentence:
+                    cropped_chars = line
                 else:
-                    masked_sentence += [char_to_idx[char]]
-                    label += [char_to_idx[char]]
+                    selected_length = random.randint(min_length, len(line))
+                    cropped_chars = line[:selected_length]
+                masked_sentence = []
+                label = []
+                mask = []
+                full_label = []
+                for char in cropped_chars:
+                    if char not in chars:
+                        continue
+                    else:
+                        prob = random.random()
+                        if prob < 0.85:
+                            masked_sentence += [char_to_idx[char]]
+                            if inference:
+                                label += [char_to_idx[char]]
+                                mask += [1]
+                            else:
+                                label += [0]
+                                mask += [0]
+                        elif prob < 0.97:
+                            masked_sentence += [char_to_idx['[MASK]']]
+                            label += [char_to_idx[char]]
+                            mask += [1]
+                        elif prob < 0.985:
+                            masked_sentence += [randint(0, len(chars) - 1)]
+                            label += [char_to_idx[char]]
+                            mask += [1]
+                        else:
+                            masked_sentence += [char_to_idx[char]]
+                            label += [char_to_idx[char]]
+                            mask += [1]
 
+                        full_label += [char_to_idx[char]]
 
-        masked_char = torch.tensor(masked_sentence)
-        label = torch.tensor(label)
+                # masked_char = torch.tensor(masked_sentence)
+                # label = torch.tensor(label)
+                # mask = torch.tensor(mask)
+                # full_label = torch.tensor(full_label)
 
-        return masked_char, label
+                writer.writerow([masked_sentence] + [label] + [mask] + [full_label])
+                # output_file.write(f'"{masked_sentence}", "{label}", "{mask}", "{full_label}"\n')
 
 
     def __iter__(self):
-        file_itr = open(self.filename)
-        mapped_itr = map(self.line_mapper, file_itr)
-        return mapped_itr
+        worker_info = torch.utils.data.get_worker_info()
+        worker_id = worker_info.id if worker_info is not None else 0
+        worker_count = worker_info.num_workers if worker_info is not None else 1
+
+        with open(self.file_path, newline='', encoding='utf-8') as input_file:
+            reader = csv.DictReader(input_file)
+            for row_number, row in enumerate(reader):
+                if row_number % worker_count != worker_id:
+                    continue
+
+                masked_char = ast.literal_eval(row['masked_sentence'])
+                label = ast.literal_eval(row['label'])
+                mask = ast.literal_eval(row['mask'])
+                full_label = ast.literal_eval(row['full_label'])
+                if not masked_char:
+                    continue
+
+                for start in range(0, len(masked_char), self.max_length):
+                    end = start + self.max_length
+                    yield (
+                        torch.tensor(masked_char[start:end], dtype=torch.long),
+                        torch.tensor(label[start:end], dtype=torch.long),
+                        torch.tensor(mask[start:end], dtype=torch.long),
+                        torch.tensor(full_label[start:end], dtype=torch.long),
+                    )
 
 
 def pad_variable(batch):
@@ -326,101 +213,12 @@ def pad_variable(batch):
 
     return sequences_padded, labels_padded.long(), lengths, masks_padded, full_labels_padded.long()
 
-
-def get_diff(sequential_data):
-    """
-    get the difference between prior and later data in sequential data list
-    """
-    return [x - sequential_data[i - 1] for i, x in enumerate(sequential_data)][1:]
-
-
-def make_typo_dictionary(short_predicted_csv_path, nearest=False):
-    """
-    make typos for each character
-    if nearest is
-        True: make artificial typos for each character depending on nearest positions on the physical keyboard
-        False: get the real typos from trained short predictor
-    """
-    typo_dict = {}
-    if nearest:
-        typo_dict['q'] = list('asw')
-        typo_dict['w'] = list('qasde')
-        typo_dict['e'] = list('wsdfr')
-        typo_dict['r'] = list('edfgt')
-        typo_dict['t'] = list('rfghy')
-        typo_dict['y'] = list('tghju')
-        typo_dict['u'] = list('yhjki')
-        typo_dict['i'] = list('ujklo')
-        typo_dict['o'] = list('iklp')
-        typo_dict['p'] = list('ol')
-        typo_dict['a'] = list('qwsxz')
-        typo_dict['s'] = list('qwedxaz')
-        typo_dict['d'] = list('wersfxc')
-        typo_dict['f'] = list('ertdgcv')
-        typo_dict['g'] = list('rtyfhvb')
-        typo_dict['h'] = list('tyugjbn')
-        typo_dict['j'] = list('yuihknm')
-        typo_dict['k'] = list('uoijlm')
-        typo_dict['l'] = list('iopk')
-        typo_dict['z'] = list('asx')
-        typo_dict['x'] = list('zsdc ')
-        typo_dict['c'] = list('xdfv ')
-        typo_dict['v'] = list('cfgb ')
-        typo_dict['b'] = list('vghn ')
-        typo_dict['n'] = list('bhjm ')
-        typo_dict['m'] = list('njk ')
-        typo_dict['.'] = list(' l')
-        typo_dict[' '] = list('zxcvbnm.')
-
+def get_dataloader(data_path, batch_size, test=False, masked_LM=False):
+    if masked_LM:
+        dataset = MaskedLM(data_path, full_sentence=False, min_length=9, inference=True)
+        data_loader = DataLoader(dataset, batch_size=batch_size, collate_fn=pad_variable)
+        return data_loader
     else:
-        df = pd.read_csv(short_predicted_csv_path)
-        ori_sentences = df['sentence']
-        pred_sentences = df['pred_sentence']
-        for ori_chars, pred_chars in zip(ori_sentences, pred_sentences):
-            char_np = np.array([char_to_idx[char] for char in ori_chars])
-            pred_char_np = np.array([char_to_idx[char] for char in pred_chars])
-
-            for ori_char, pred_char in zip(char_np, pred_char_np):
-                if ori_char != pred_char:
-                    if typo_dict.get(ori_char) is None:
-                        typo_dict[ori_char] = [pred_char]
-                    else:
-                        if not pred_char in typo_dict[ori_char]:
-                            typo_dict[ori_char].append(pred_char)
-
-    return typo_dict
-
-
-def get_dataloader(data_path, batch_size, min_length, various=True, full_sentence=False, test=False, augment=False, masked_LM=False, inference=False):
-    if various:
-        if masked_LM:
-            dataset = MaskedLM(data_path, full_sentence=full_sentence, min_length=min_length, inference=inference)
-            # dataset = Masked1BW(data_path, full_sentence=full_sentence, min_length=min_length, inference=inference)
-            data_loader = DataLoader(dataset, batch_size=batch_size, collate_fn=pad_variable)
-            return data_loader
-        dataset = DataVariableLength(data_path, full_sentence=full_sentence, min_length=min_length, augment=augment)
-        shuffle = True
-        if test:
-            shuffle = False
-
-        data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=pad_variable)
-    else:
-        dataset = DataFixedLength(data_path, interval=True, length=3)
-        data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-    return data_loader
-
-
-if __name__ == "__main__":
-    fixed = DataFixedLength('./data/TMI_Data/data_val.csv', True)
-    # variable = MaskedLM('sample_1bw.txt', full_sentence=False, min_length=13)
-    # print(len(variable))
-    # print(variable[100])
-    dataloader = DataLoader(fixed, batch_size=16, shuffle=True)
-    x_batch, y_batch = next(iter(dataloader))
-
-    print("x is {}".format(x_batch))
-    print("x shape is {}".format(x_batch.shape))
-    # print("length is {}".format(length))
-    print("y is {}".format(y_batch))
-    print("y shape is {}".format(y_batch.shape))
+        dataset = DataVariableLength(data_path, full_sentence=False, min_length=9, augment=False)
+        data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=not test, collate_fn=pad_variable)
+        return data_loader
