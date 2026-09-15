@@ -1,3 +1,5 @@
 /.vscode
 *.pyc
 *.gguf
+*.npy
+*.uint8

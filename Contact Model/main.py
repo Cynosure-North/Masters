@@ -84,3 +84,23 @@
 # pixels with a 50% probability. The validation accuracy was measured by using the validation set at
 # every epoch, and if the maximum accuracy was not updated for more than 3 epochs, the training was
 # terminated by early stopping.
+
+import BERT
+import BiGRU
+import SANCD
+
+
+def main():
+	"""Train the component models before fine-tuning the complete SANCD model."""
+	print("######### Training BiGRU")
+	BiGRU.main()
+
+	print("######### Training BERT")
+	BERT.main()
+
+	print("######### Training SANCD")
+	SANCD.main()
+
+
+if __name__ == "__main__":
+	main()
