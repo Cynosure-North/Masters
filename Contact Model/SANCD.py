@@ -5,7 +5,7 @@ from pathlib import Path
 
 import BiGRU
 import BERT
-from data import DataVariableLength, pad_variable
+from data import VariableLengthDataset, pad_variable
 
 
 class SANCD(nn.Module):
@@ -206,13 +206,13 @@ def main():
 	train_path = data_dir / "train.csv"
 	validation_path = data_dir / "validation.csv"
 	test_path = data_dir / "test.csv"
-	bigru_path = project_dir / "Trained" / "best_BiGRU.pth"
-	bert_path = project_dir / "Trained" / "best_BERT.pth"
-	save_path = project_dir / "Trained" / "best_SANCD.pth"
+	bigru_path = project_dir / "trained" / "best_BiGRU.pth"
+	bert_path = project_dir / "trained" / "best_BERT.pth"
+	save_path = project_dir / "trained" / "best_SANCD.pth"
 
 	model = SANCD(bigru_path=bigru_path, bert_path=bert_path)
-	train_dataset = DataVariableLength(train_path, min_length=9)
-	validation_dataset = DataVariableLength(validation_path, min_length=9)
+	train_dataset = VariableLengthDataset(train_path, min_length=9)
+	validation_dataset = VariableLengthDataset(validation_path, min_length=9)
 
 	loader_kwargs = {
 		"batch_size": 64,
@@ -238,7 +238,7 @@ def main():
 	print("training complete")
 	torch.save(trained_model.state_dict(), save_path)
 
-	test_dataset = DataVariableLength(test_path, min_length=9)
+	test_dataset = VariableLengthDataset(test_path, min_length=9)
 	test_dataloader = DataLoader(test_dataset, shuffle=False, **loader_kwargs)
 	metrics = test_model(trained_model, test_dataloader)
 	for component, (loss, accuracy) in metrics.items():

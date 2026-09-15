@@ -14,137 +14,234 @@
 
 import torch
 import torch.nn as nn
-import matplotlib.pyplot as plt
-import seaborn as sns
+from torch.utils.data import DataLoader
 from pathlib import Path
-import dataset as dataset
+from data import PoseDataset
 
-model_path = Path(__file__).joinpath("trained", "TNN_weights.pt")	# TODO: I'll need to update this to have one model per finger
-sns.set_theme(style="whitegrid")
-device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
 
-class PoseMLP(nn.Module):
-	def __init__(self):
+fingers = ["l_little", "l_ring", "l_middle", "l_index", "l_thumb", "r_little", "r_ring", "r_middle", "r_index", "r_thumb"]
+finger_to_keys = {
+	"l_little": "qaz",
+	"l_ring": "qwsxz",
+	"l_middle": "edcrx",
+	"l_index": "rtgfgcvby",
+	"l_thumb": " ",
+	"r_thumb": " ",
+	"r_index": "yuhjbnmi",
+	"r_middle": "ikm,ol",
+	"r_ring": "lo.p",
+	"r_little": "" }
+
+# key_to_finger = {}
+# for char in 'abcdefghijklmnopqrstuvwxyz':
+# 	tmp = []
+# 	for key, value in finger_to_keys.items():
+# 		if char in value:
+# 			tmp.append(key)
+# 	key_to_finger[char] = tmp
+				
+
+
+
+class Inidiv_PoseMLP(nn.Module):
+	def __init__(self, *, inputs=25, nuerons=60, outputs=9):
 		super().__init__()
+		self.outputs = outputs
+
 		self.network = nn.Sequential(
-			nn.Linear(25, 60),
+			nn.Linear(inputs, nuerons),
 			nn.Sigmoid(),
-			nn.Linear(60, 9),
+			nn.Linear(nuerons, outputs),
 		)
 
 	def forward(self, inputs):
+		if self.outputs == 0:
+			return 0
+			# TODO
+		if self.outputs == 1:
+			return 1
+			# TODO
+			# return " "
 		return self.network(inputs)
 
-def preprocess(todo):
-	pass
+class PoseMLP(nn.Module):
+	def __init__(self, models=None, *, inputs=25, neurons=60):
+		super().__init__()
 
-	# Data into vector format
-		# To estimate the pose of each finger, we measured the angle ($$ \theta $$) between the hand joint vectors as a
-		# representative metric. It is indicative of the degree of finger bending. The angle was calculated as
-		# a cosine function as follows. (MW vectors point to the wrist, and MF to the fingertip)
-		
-		
-		# $$ cos\theta_n = \frac{\overrightarrow{MW_n}; \overrightarrow{MF_n}}{\norm{\overrightarrow{MW_n}} \cross \norm{{\overrightarrow{MF_n}}}}, n \in \{\text{all fingers}\}$$
-		
-		
-		# Exceptionally, there were no differences in finger angles between when entering the Y and U keys for
-		# all fingers including the touching finger (p > 0.05). To differentiate these two keys, we were
-		# required to analyze another hand characteristic that affects the global hand position, such as the
-		# hand direction. We checked whether the hand direction was different depending on input keys using
-		# the same analysis used for analyzing finger angles. The hand direction was estimated as follows
-		
-		
-		# $$ \text{hand direction} = \frac{\overrightarrow{WM_{index}} + \overrightarrow{WM_{little}}}{\norm{\overrightarrow{WM_{index}} + \overrightarrow{WM_{little}}}} $$
+		self.models = nn.ModuleDict()
+		if models is None:
+			models = {
+				key: Inidiv_PoseMLP(inputs=inputs, nuerons=neurons, outputs=len(value))
+				for key, value in finger_to_keys.items()
+			}
+		self.models.update(models)
 
+	def forward(self, data, finger=None):
+		if finger is None:
+			raise ValueError("finger is required because each finger has a different key vocabulary")
+		if finger not in self.models:
+			raise KeyError(f"No pose model is configured for finger: {finger}")
+		return self.models[finger](data)
 
-	# normalise
-		# During the first stage of the preprocessing, the Normalizer transformed each hand joint vector to
-		# be a unit vector. As the Normalizer extracted the unit vectors independently from each hand size,
-		# it reduced the variance of our typing data.
-
-	# scale
-		# Then, in the second stage, the StandardScaler made each feature of the unit vector follow
-		# the standard normal distribution.															Why force things into a normal distribution
-
-	# pca, output 25 compontents
-	
-def assign_finger(todo):
-	pass
+def instantiate_models(model_path, *, inputs=25, nuerons=60):
+	"""Create the multi-finger model and optionally load a checkpoint."""
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+	model = PoseMLP(inputs=inputs, neurons=nuerons)
+	checkpoint = Path(model_path)
+	if not checkpoint.exists():
+		raise FileNotFoundError(f"Model checkpoint not found: {checkpoint}")
+	state_dict = torch.load(checkpoint, map_location=device, weights_only=True)
+	model.load_state_dict(state_dict, strict=True)
+	return model.to(device)
 
 
-def train(dataloader, model, loss_fn, optimizer):
-	size = len(dataloader.dataset)
-	model.train()
-	running_loss = 0.0
-	num_batches = 0
-	for batch, (X, y, input_lengths, target_lengths) in enumerate(dataloader):
-		log_probs = model(X)
-		log_probs = nn.functional.log_softmax(log_probs, dim=-1).transpose(0, 1)
-		loss = loss_fn(log_probs, y, input_lengths, target_lengths)
 
-		loss.backward()
-		optimizer.step()
-		optimizer.zero_grad()
+def _key_indices(keys, finger):
+	key_to_index = {key: index for index, key in enumerate(finger_to_keys[finger])}
+	if isinstance(keys, torch.Tensor):
+		return keys.long()
+	try:
+		return torch.tensor([key_to_index[key] for key in keys], dtype=torch.long)
+	except KeyError as error:
+		raise ValueError(f"Key {error.args[0]!r} is not assigned to {finger}") from error
 
-		running_loss += loss.item()
-		num_batches += 1
 
-		if batch % 100 == 0:
-			print(f"loss: {loss.item():>7f}  [{(batch + 1):>5d}/{size:>5d}]")
+def train_model(model, dataloader, *, epochs=10, learning_rate=1e-3,
+		device=None, checkpoint_path=None, validation_dataloader=None,
+		patience=3, loss_fn=None):
+	"""Train all ten finger classifiers on interleaved key/finger datapoints."""
+	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+	model.to(device)
+	loss_fn = loss_fn or nn.CrossEntropyLoss()
+	optimizers = {
+		finger: torch.optim.Adam(model.models[finger].parameters(), lr=learning_rate)
+		for finger in fingers
+		if finger_to_keys[finger]
+	}
+	best_state = None
+	best_loss = float("inf")
+	stale_epochs = 0
 
-	return running_loss / max(num_batches, 1)
+	for epoch in range(epochs):
+		model.train()
+		finger_losses = {finger: [] for finger in optimizers}
 
-def test(dataloader, model, loss_fn):
-	num_batches = len(dataloader)
-	model.eval()
-	test_loss = 0.0
+		for keys, batch_fingers, features in dataloader:
+			features = features.to(device, non_blocking=True).float()
+			for finger, optimizer in optimizers.items():
+				selected = torch.tensor(
+					[current_finger == finger for current_finger in batch_fingers],
+					dtype=torch.bool,
+					device=device,
+				)
+				if not selected.any():
+					continue
+				finger_features = features[selected]
+				finger_keys = _key_indices(
+					[key for key, keep in zip(keys, selected.cpu().tolist()) if keep], finger,
+				).to(device)
+				optimizer.zero_grad(set_to_none=True)
+				loss = loss_fn(model(finger_features, finger), finger_keys)
+				loss.backward()
+				optimizer.step()
+				finger_losses[finger].append(loss.item())
+
+		train_loss = {
+			finger: sum(losses) / len(losses)
+			for finger, losses in finger_losses.items()
+			if losses
+		}
+
+		if validation_dataloader is None:
+			print(f"Epoch {epoch + 1} -- train loss: {train_loss}")
+			continue
+		validation_loss, validation_accuracy = test_model(
+			model, validation_dataloader, device=device, loss_fn=loss_fn
+		)
+		if validation_loss < best_loss:
+			best_loss = validation_loss
+			best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+			stale_epochs = 0
+			if checkpoint_path is not None:
+				torch.save(best_state, checkpoint_path)
+		else:
+			stale_epochs += 1
+		print(f"Epoch {epoch + 1} -- train loss: {train_loss}, validation loss: {validation_loss:.6f}, validation accuracy: {validation_accuracy:.4%}")
+		if stale_epochs >= patience:
+			break
+
+	if best_state is not None:
+		model.load_state_dict(best_state)
+	return model
+
+
+@torch.no_grad()
+def test_model(model, dataloader, *, device=None, loss_fn=None):
+	"""Evaluate each interleaved datapoint with its assigned finger model."""
+	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+	model.to(device).eval()
+	loss_fn = loss_fn or nn.CrossEntropyLoss()
+	total_loss = 0.0
+	total_correct = 0
+	total_count = 0
+
 	with torch.no_grad():
-		for X, y, input_lengths, target_lengths in dataloader:
-			log_probs = model(X)
-			log_probs = nn.functional.log_softmax(log_probs, dim=-1).transpose(0, 1)
-			test_loss += loss_fn(log_probs, y, input_lengths, target_lengths).item()
-	test_loss /= max(num_batches, 1)
-	print(f"Test Error: \n Avg loss: {test_loss:>8f} \n")
-	return test_loss
+		for keys, batch_fingers, features in dataloader:
+			features = features.to(device, non_blocking=True).float()
+			for finger in fingers:
+				if not finger_to_keys[finger]:
+					continue
+				selected = torch.tensor(
+					[current_finger == finger for current_finger in batch_fingers],
+					dtype=torch.bool,
+					device=device,
+				)
+				if not selected.any():
+					continue
+				finger_keys = _key_indices(
+					[key for key, keep in zip(keys, selected.cpu().tolist()) if keep], finger,
+				).to(device)
+				logits = model(features[selected], finger)
+				batch_size = finger_keys.numel()
+				total_loss += loss_fn(logits, finger_keys).item() * batch_size
+				total_correct += (logits.argmax(dim=-1) == finger_keys).sum().item()
+				total_count += batch_size
 
+	return total_loss / max(total_count, 1), total_correct / max(total_count, 1)
 
 def main():
-	train_loader = dataset.train_loader
-	test_loader = dataset.test_loader
+	project_dir = Path(__file__).resolve().parent
+	save_path = project_dir / "best_weights.pth"
+	data_dir = project_dir / "data"
+	train_path = data_dir / "train.csv"
+	validation_path = data_dir / "validation.csv"
+	test_path = data_dir / "test.csv"
 
-	model = PoseMLP().to(device)
+	model = PoseMLP()
 
-	loss_fn = torch.nn.CTCLoss(blank=0)
-	optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+	if save_path.exists():
+		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))
+		print("loaded saved weights")
 
-	epochs = 2
-	train_losses = []
-	test_losses = []
-	for t in range(epochs):
-		print(f"Epoch {t+1}\n-------------------------------")
-		epoch_train_loss = train(train_loader, model, loss_fn, optimizer)
-		train_losses.append(epoch_train_loss)
-		test_loss = test(test_loader, model, loss_fn)
-		test_losses.append(test_loss)
-		print(f"Epoch {t+1} train loss: {epoch_train_loss:.6f}, test loss: {test_loss:.6f}")
+	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
+	train_dataloader = DataLoader(PoseDataset(train_path), shuffle=True, **loader_kwargs)
+	validation_dataloader = DataLoader(PoseDataset(validation_path), shuffle=False, **loader_kwargs)
+	test_dataloader = DataLoader(PoseDataset(test_path), shuffle=False, **loader_kwargs)
+	print("data loaded")
 
-	print("Saving model to {model_path}")
-	torch.save(model.state_dict(), model_path)
+	trained_model = train_model(
+		model,
+		train_dataloader,
+		epochs=200,
+		validation_dataloader=validation_dataloader,
+	)
 
-	plt.figure(figsize=(8, 5))
-	sns.lineplot(x=list(range(1, len(train_losses) + 1)), y=train_losses, label="Training loss", marker="o")
-	sns.lineplot(x=list(range(1, len(test_losses) + 1)), y=test_losses, label="Test loss", marker="s")
-	plt.xlabel("Epoch")
-	plt.ylabel("Loss")
-	plt.title("Training and Test Loss")
-	plt.legend()
-	plt.tight_layout()
-	plt.show()
-	print("Done!")
+	print("training complete")
+	torch.save(trained_model.state_dict(), save_path)
+
+	loss, accuracy = test_model(trained_model, test_dataloader)
+	print(f"Test Loss: {loss}")
+	print(f"Test Accuracy: {accuracy:.4%}")
 
 if __name__ == "__main__":
 	main()
-
-model = PoseMLP().to(device)
-model.load_state_dict(torch.load(model_path, weights_only=True))
-model.eval()

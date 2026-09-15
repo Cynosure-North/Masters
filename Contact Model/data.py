@@ -7,18 +7,16 @@ from random import randint
 import os
 from pathlib import Path
 import numpy as np
-import torch
+import csv
 
-np.random.seed(1)
-random.seed(1)
-# Character IDs are shared by the geometric and semantic models.
+SEED = 0
+
 chars = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', ' ', ',', '.']
 char_to_idx = {ch: i for i, ch in enumerate(chars)}
 idx_to_char = {i: ch for i, ch in enumerate(chars)}
-DATASET_DIR = Path(r"C:\Users\mno64\Datasets\1-billion-word-benchmark")
 
 
-class DataVariableLength(Dataset):
+class VariableLengthDataset(Dataset):
 	"""Data loader for the long-term decoder.
 	DataLongTerm parses the raw data and extracts
 	(seq. of user input, g.t. seq. of characters) pairs of each full sentence.
@@ -83,39 +81,58 @@ def pad_variable(batch):
 	return sequences_padded, full_labels_padded.long()
 
 def get_dataloader(data_path, batch_size, test=False):
-	dataset = DataVariableLength(data_path, full_sentence=False, min_length=9, augment=False)
+	dataset = VariableLengthDataset(data_path, full_sentence=False, min_length=9, augment=False)
 	return DataLoader(dataset, batch_size=batch_size, shuffle=not test, collate_fn=pad_variable)
 
 ####################################
 
-class TokenizedBWDataset(Dataset):
+class MaskedDataset(Dataset):
 	"""Memory-mapped, pre-tokenized version of the benchmark dataset."""
 
+	DATASET_DIR = Path(r"C:\Users\mno64\Datasets\1-billion-word-benchmark")
 	train_path = DATASET_DIR / "train.txt"
 	test_path = DATASET_DIR / "test.txt"
 
 	def __init__(self, train, tokenizer, cache_dir=None, max_length=512):
 		self.tokenizer = tokenizer
+		self.vocab_size = len(tokenizer)
 		self.max_length = max_length
-		self.source_path = TokenizedBWDataset.train_path if train else TokenizedBWDataset.test_path
+		self.source_path = MaskedDataset.train_path if train else MaskedDataset.test_path
 		self.cache_dir = (
 			Path(cache_dir)
 			if cache_dir is not None
-			else Path(__file__).resolve().parent / "tokenized_cache" )
+			else Path(__file__).resolve().parent / "_cache" )
 		name = "train" if train else "test"
 		self.tokens_path = os.path.join(self.cache_dir, f"{name}_tokens.uint8")
 		self.offsets_path = os.path.join(self.cache_dir, f"{name}_offsets.int64.npy")
+		self.signature_path = os.path.join(self.cache_dir, f"{name}_vocab_signature.int64.npy")
 
-		if not (os.path.exists(self.tokens_path) and os.path.exists(self.offsets_path)):
+		if not self._cache_is_valid():
 			self._build_cache()
 
 		self._tokens = None
 		self._offsets = np.load(self.offsets_path, mmap_mode="r")
 		self.lengths = np.diff(self._offsets).astype(np.int32, copy=False)
 
+	def _cache_is_valid(self):
+		if not (os.path.exists(self.tokens_path) and os.path.exists(self.offsets_path) and os.path.exists(self.signature_path)):
+			return False
+		try:
+			signature = np.load(self.signature_path, allow_pickle=False)
+			return signature.size == 1 and int(signature[0]) == self.vocab_size
+		except Exception:
+			return False
+
 	def _build_cache(self):
 		# Store token bytes and offsets separately so large corpora can be memory-mapped.
 		os.makedirs(self.cache_dir, exist_ok=True)
+		# Invalidate stale cache files when the tokenizer vocabulary changes.
+		for stale_path in (self.tokens_path, self.offsets_path, self.signature_path):
+			if os.path.exists(stale_path):
+				try:
+					os.remove(stale_path)
+				except OSError:
+					pass
 		offsets = [0]
 		with open(self.source_path, "r", encoding="utf-8") as source, open(self.tokens_path, "wb") as target:
 			for line in source:
@@ -125,6 +142,7 @@ class TokenizedBWDataset(Dataset):
 				target.write(bytes(sequence))
 				offsets.append(offsets[-1] + len(sequence))
 		np.save(self.offsets_path, np.asarray(offsets, dtype=np.int64))
+		np.save(self.signature_path, np.asarray([self.vocab_size], dtype=np.int64))
 
 	def _ensure_tokens_open(self):
 		if self._tokens is None:
@@ -138,9 +156,79 @@ class TokenizedBWDataset(Dataset):
 		self._ensure_tokens_open()
 		start, end = self._offsets[idx], self._offsets[idx + 1]
 		sequence = np.array(self._tokens[start:end], dtype=np.uint8, copy=True)
+		if sequence.size and int(sequence.max()) >= self.vocab_size:
+			raise ValueError(
+				f"Cached token sequence for record {idx} contains invalid token IDs: "
+				f"max={int(sequence.max())}, vocab_size={self.vocab_size}. "
+				"Delete the cache files under the Contact Model/_cache folder and rerun."
+			)
 		return torch.from_numpy(sequence)
 
 	def __getstate__(self):
 		state = self.__dict__.copy()
 		state["_tokens"] = None
 		return state
+
+####################################
+
+def preproces():
+	DATA_DIR = Path(__file__).resolve().parent / "data" / "geometric"
+	INPUT_FILE = DATA_DIR / "IMK_data.csv"
+	TRAIN_FILE = DATA_DIR / "train.csv"
+	VALIDATION_FILE = DATA_DIR / "validation.csv"
+	TEST_FILE = DATA_DIR / "test.csv"
+
+	TEST_VAL_RATIO = 0.1
+	SEED = 0
+
+
+	def normalize_coordinates(values, divisor):
+		# Clamp normalized coordinates so malformed measurements cannot leave the [0, 1] range.
+		result = []
+
+		for value in values.split(","):
+			normalized = float(value) / divisor
+			normalized = max(0.0, min(1.0, normalized))
+			result.append(f"{normalized:.12f}")
+
+		return ",".join(result)
+
+
+	with INPUT_FILE.open("r", newline="", encoding="utf-8") as file:
+		reader = csv.DictReader(file)
+		rows = list(reader)
+		fieldnames = reader.fieldnames
+
+	for row in rows:
+		width = float(row["width"])
+		height = float(row["height"])
+
+		row["x_list"] = normalize_coordinates(row["x_list"], width)
+		row["y_list"] = normalize_coordinates(row["y_list"], height)
+
+	random.Random(SEED).shuffle(rows)
+
+	test_size = int(len(rows) * TEST_VAL_RATIO)
+	val_rows = rows[:test_size]
+	test_rows = rows[test_size:test_size*2]
+	train_rows = rows[test_size*2:]
+
+
+	def write_csv(path, data):
+		with path.open("w", newline="", encoding="utf-8") as file:
+			writer = csv.DictWriter(file, fieldnames=fieldnames)
+			writer.writeheader()
+			writer.writerows(data)
+
+
+	write_csv(TRAIN_FILE, train_rows)
+	write_csv(VALIDATION_FILE, val_rows)
+	write_csv(TEST_FILE, test_rows)
+
+	print(f"Training rows: {len(train_rows)}")
+	print(f"Validation rows: {len(val_rows)}")
+	print(f"Test rows: {len(test_rows)}")
+	print(f"Written: {TRAIN_FILE}, {VALIDATION_FILE}, {TEST_FILE}")
+
+if __name__ == "__main__":
+	preproces()

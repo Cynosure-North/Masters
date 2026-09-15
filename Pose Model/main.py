@@ -1,7 +1,7 @@
 import editdistance # pyright: ignore[reportMissingModuleSource]
 
 from model import model
-from dataset import test_data
+from data import test_data
 
 num_incorrect = 0
 total_distance = 0
@@ -9,7 +9,7 @@ incorrect = []
 
 # TODO: Evaluate
 for phrase in test_data:
-	# TODO: Assign finger first
+	# TODO: Assign finger first - use contact detection
 	pred = model(test_data)
 	levenshtein = editdistance.eval(pred, test_data[phrase])
 

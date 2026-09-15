@@ -3,3 +3,5 @@
 *.gguf
 *.npy
 *.uint8
+__pycache__
+.cache

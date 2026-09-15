@@ -4,7 +4,7 @@ from torch.utils.data import BatchSampler, DataLoader
 from functools import partial
 from pathlib import Path
 
-from data import TokenizedBWDataset, chars
+from data import MaskedDataset, chars
 
 if torch.cuda.is_available():
 	torch.set_float32_matmul_precision("high")
@@ -193,7 +193,7 @@ def _prepare_batch(batch, tokenizer, device, max_length=None):
 	return input_ids, padding_mask
 
 def pad_collate(batch, pad_token_id):
-	input_ids = nn.utils.pad_sequence(batch, batch_first=True, padding_value=pad_token_id)
+	input_ids = nn.utils.rnn.pad_sequence(batch, batch_first=True, padding_value=pad_token_id)
 	return input_ids, input_ids.eq(pad_token_id)
 
 class LengthBucketBatchSampler(BatchSampler):
@@ -291,12 +291,13 @@ def train_model(
 			if batch_count % 500 == 0: print(f"batch {batch_count} of epoch {epoch} finished -- loss: {batch_loss}")
 			if batch_count % 50000 == 0: 
 
-				torch.save(model.state_dict(), f"C:\\Users\\mno64\\Thesis\\Contact Model\\Trained\\BERT_{epoch}_{batch_count/50_000}.pth")
+				# TODO: It'd be nice to take save path as a parameter and only change the basename
+				torch.save(model.state_dict(), f"C:\\Users\\mno64\\Thesis\\Contact Model\\trained\\BERT_{epoch}_{batch_count/50_000}.pth")
 				print(f"Saved checkpoint, epoch: {epoch} batch {batch_count/50_000}")
 
 				# Store the most recent 2 checkpoints, cleanup past ones to save memory
 				
-				Path(f"C:\\Users\\mno64\\Thesis\\Contact Model\\Trained\\BERT_{epoch}_{(batch_count-100_000)/50_000}.pth").unlink(missing_ok=True)
+				Path(f"C:\\Users\\mno64\\Thesis\\Contact Model\\trained\\BERT_{epoch}_{(batch_count-100_000)/50_000}.pth").unlink(missing_ok=True)
 
 
 		if batch_count == 0:
@@ -370,41 +371,46 @@ def test_model(
 
 def main():
 	project_dir = Path(__file__).resolve().parent
-	save_path = project_dir / "Trained" / "best_BERT.pth"
+	save_path = project_dir / "trained" / "best_BERT.pth"
+
 	tokenizer = CharTokenizer()
 	model = CharBERTForMLM(vocab_size=len(tokenizer), d_model=128, nhead=4, num_layers=3)
+
 	if save_path.exists():
 		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))
 		print("loaded saved weights")
-	train_dataset = TokenizedBWDataset(train=True, tokenizer=tokenizer, max_length=model.pos_embedding.num_embeddings)
+
+	train_dataset = MaskedDataset(train=True, tokenizer=tokenizer, max_length=model.pos_embedding.num_embeddings)
 	train_sampler = LengthBucketBatchSampler(train_dataset.lengths, batch_size=64, shuffle=True)
+	loader_kwargs = {
+		"collate_fn": partial(pad_collate, pad_token_id=tokenizer.pad_token_id),
+		"num_workers": 2,
+		"pin_memory": True,
+		"persistent_workers": True,
+	}
 	dataloader = DataLoader(
 		train_dataset,
 		batch_sampler=train_sampler,
-		collate_fn=partial(pad_collate, pad_token_id=tokenizer.pad_token_id),
-		num_workers=2,
-		pin_memory=True,
-		persistent_workers=True,
+		**loader_kwargs,
 	)
 	print("data loaded")
-	trained_model = train_model(model, dataloader, tokenizer, use_amp=True, use_compile=False)
-	print("training complete")
 
+	trained_model = train_model(model, dataloader, tokenizer, use_amp=True, use_compile=False)
+
+	print("training complete")
 	torch.save(trained_model.state_dict(), save_path)
 
-	test_dataset = TokenizedBWDataset(train=False, tokenizer=tokenizer, max_length=model.pos_embedding.num_embeddings)
+	test_dataset = MaskedDataset(train=False, tokenizer=tokenizer, max_length=model.pos_embedding.num_embeddings)
 	test_sampler = LengthBucketBatchSampler(test_dataset.lengths, batch_size=64, shuffle=False)
 	test_dataloader = DataLoader(
 		test_dataset,
 		batch_sampler=test_sampler,
-		collate_fn=partial(pad_collate, pad_token_id=tokenizer.pad_token_id),
-		num_workers=2,
-		pin_memory=True,
-		persistent_workers=True,
+		**loader_kwargs,
 	)
+
 	loss, accuracy = test_model(trained_model, test_dataloader, tokenizer)
 	print(f"Test Loss: {loss}")
-	print(f"Test Masked-Token Accuracy: {accuracy:.4%}")
+	print(f"Test Accuracy: {accuracy:.4%}")
 
 if __name__ == "__main__":
 	main()

@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from copy import deepcopy
 from pathlib import Path
-from data import chars, DataVariableLength, pad_variable
+from data import chars, MaskedDataset
 
 class BiGRU(nn.Module):
 	def __init__(self, input_size=2, hidden_size=128, num_layers=2, output_size=len(chars)):
@@ -211,11 +211,11 @@ def test_model(
 
 def main():
 	project_dir = Path(__file__).resolve().parent
-	data_dir = project_dir / "data" / "geometric"
+	save_path = project_dir / "best_weights.pth"
+	data_dir = project_dir / "data"
 	train_path = data_dir / "train.csv"
 	validation_path = data_dir / "validation.csv"
 	test_path = data_dir / "test.csv"
-	save_path = project_dir / "Trained" / "best_BiGRU.pth"
 
 	model = BiGRU()
 
@@ -223,33 +223,28 @@ def main():
 		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))
 		print("loaded saved weights")
 
-	train_dataset = DataVariableLength(train_path, min_length=9)
-	validation_dataset = DataVariableLength(validation_path, min_length=9)
-	loader_kwargs = {"batch_size": 64, "collate_fn": pad_variable, "num_workers": 2, "pin_memory": True}
-	dataloader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
-	validation_dataloader = DataLoader(validation_dataset, shuffle=False, **loader_kwargs)
+	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
+	train_dataloader = DataLoader(MaskedDataset(train_path), shuffle=True, **loader_kwargs)
+	validation_dataloader = DataLoader(MaskedDataset(validation_path), shuffle=False, **loader_kwargs)
+	test_dataloader = DataLoader(MaskedDataset(test_path), shuffle=False, **loader_kwargs)
 	print("data loaded")
 
 	trained_model = train_model(
 		model,
-		dataloader,
+		train_dataloader,
 		epochs=200,
 		validation_dataloader=validation_dataloader,
-		patience=3,
 		gradient_clip=0.5,
 		use_amp=True,
 		checkpoint_path=save_path,
 	)
 
 	print("training complete")
-
 	torch.save(trained_model.state_dict(), save_path)
 
-	test_dataset = DataVariableLength(test_path)
-	test_dataloader = DataLoader(test_dataset, shuffle=False, **loader_kwargs)
 	loss, accuracy = test_model(trained_model, test_dataloader)
 	print(f"Test Loss: {loss}")
-	print(f"Test Masked-Token Accuracy: {accuracy:.4%}")
+	print(f"Test Accuracy: {accuracy:.4%}")
 
 if __name__ == "__main__":
 	main()

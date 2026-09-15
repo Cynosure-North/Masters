@@ -1,13 +1,8 @@
 import torch
 import torch.nn.functional as F
-import matplotlib.pyplot as plt
-import seaborn as sns
+from torch.utils.data import DataLoader
 from pathlib import Path
-import dataset as KPdataset
-
-model_path = Path(__file__).parent.parent.joinpath("downloaded", "TNN_weights.pt")
-sns.set_theme(style="whitegrid")
-device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
+from data import MotionDataset, chars
 
 class ResidualTCNBlock(torch.nn.Module):
 	def __init__(self, in_channels, out_channels, kernel_size=2, dilation=3):
@@ -35,7 +30,7 @@ class ResidualTCNBlock(torch.nn.Module):
 		return torch.relu(x + residual)
 
 
-class KeyPressModel(torch.nn.Module):
+class TNN(torch.nn.Module):
 	def __init__(self, input_features=20, num_classes=None, hidden_channels=(64, 64, 32), kernel_size=2, dilation=3):
 		super().__init__()
 		self.input_features = input_features
@@ -69,86 +64,194 @@ class KeyPressModel(torch.nn.Module):
 		return self.output_projection(x)
 
 
-def train(dataloader, model, loss_fn, optimizer):
-	size = len(dataloader.dataset)
-	model.train()
-	running_loss = 0.0
-	num_batches = 0
-	for batch, (X, y, input_lengths, target_lengths) in enumerate(dataloader):
-		log_probs = model(X)
-		log_probs = F.log_softmax(log_probs, dim=-1).transpose(0, 1)
-		loss = loss_fn(log_probs, y, input_lengths, target_lengths)
-
-		loss.backward()
-		optimizer.step()
-		optimizer.zero_grad()
-
-		running_loss += loss.item()
-		num_batches += 1
-
-		if batch % 100 == 0:
-			print(f"loss: {loss.item():>7f}  [{(batch + 1):>5d}/{size:>5d}]")
-
-	return running_loss / max(num_batches, 1)
+def collate_batch(batch):
+	features, targets, target_lengths = zip(*batch)
+	padded_features = torch.nn.utils.rnn.pad_sequence(features, batch_first=True)
+	padded_targets = torch.nn.utils.rnn.pad_sequence(targets, batch_first=True, padding_value=0)
+	input_lengths = torch.tensor([feature.size(0) for feature in features], dtype=torch.long)
+	target_lengths = torch.tensor(target_lengths, dtype=torch.long)
+	return padded_features, padded_targets, input_lengths, target_lengths
 
 
-def test(dataloader, model, loss_fn):
-	num_batches = len(dataloader)
+def instantiate_model(
+	model_path=None,
+	*,
+	input_features=None,
+	num_classes=None,
+	hidden_channels=(64, 64, 32),
+	kernel_size=2,
+	dilation=3,
+	device=None,
+):
+	"""Create a KeyPressModel and optionally load weights from a checkpoint."""
+	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+	model = TNN(
+		input_features=input_features,
+		num_classes=num_classes,
+		hidden_channels=hidden_channels,
+		kernel_size=kernel_size,
+		dilation=dilation,
+	).to(device)
+	if model_path is not None:
+		model_path = Path(model_path)
+		if not model_path.exists():
+			raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
+		state_dict = torch.load(model_path, map_location=device, weights_only=True)
+		if isinstance(state_dict, dict) and any(key.startswith("module.") for key in state_dict):
+			state_dict = {key.replace("module.", "", 1): value for key, value in state_dict.items()}
+		model.load_state_dict(state_dict, strict=True)
+	return model
+
+
+def _ctc_loss(model, batch, loss_fn, device):
+	features, targets, input_lengths, target_lengths = batch
+	features = features.to(device, non_blocking=True)
+	targets = targets.to(device, non_blocking=True)
+	input_lengths = input_lengths.to(device, non_blocking=True)
+	target_lengths = target_lengths.to(device, non_blocking=True)
+	log_probs = F.log_softmax(model(features), dim=-1).transpose(0, 1)
+	return loss_fn(log_probs, targets, input_lengths, target_lengths)
+
+
+def train_model(
+	model,
+	dataloader,
+	validation_dataloader=None,
+	epochs=3,
+	patience=3,
+	min_delta=0.0,
+	optimizer=None,
+	device=None,
+	gradient_clip=None,
+	loss_fn=None,
+	checkpoint_path=None,
+):
+	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+	model.to(device)
+	optimizer = optimizer or torch.optim.Adam(model.parameters(), lr=1e-3)
+	loss_fn = loss_fn or torch.nn.CTCLoss(blank=0)
+	best_validation_loss = float("inf")
+	best_state = None
+	stale_epochs = 0
+
+	for epoch in range(epochs):
+		model.train()
+		epoch_loss = 0.0
+		batch_count = 0
+		for batch in dataloader:
+			optimizer.zero_grad(set_to_none=True)
+			loss = _ctc_loss(model, batch, loss_fn, device)
+			if not torch.isfinite(loss):
+				raise RuntimeError(f"Non-finite loss at epoch {epoch}: {loss.item()}")
+			loss.backward()
+			if gradient_clip is not None:
+				torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
+			optimizer.step()
+			epoch_loss += loss.item()
+			batch_count += 1
+
+		epoch_loss /= max(batch_count, 1)
+		message = f"Epoch {epoch} -- train loss: {epoch_loss:.6f}"
+
+		if validation_dataloader is not None:
+			validation_loss, _ = test_model(model, validation_dataloader, device=device, loss_fn=loss_fn)
+			message += f", validation loss: {validation_loss:.6f}"
+			if validation_loss < best_validation_loss - min_delta:
+				best_validation_loss = validation_loss
+				best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+				stale_epochs = 0
+				if checkpoint_path is not None:
+					torch.save(best_state, checkpoint_path)
+			else:
+				stale_epochs += 1
+				message += f", patience: {stale_epochs}/{patience}"
+				if stale_epochs >= patience:
+					print(message)
+					print("Early stopping")
+					break
+
+		print(message)
+
+	if best_state is not None:
+		model.load_state_dict(best_state)
+	return model
+
+
+@torch.no_grad()
+def test_model(model, dataloader, device=None, loss_fn=None):
+	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+	model.to(device)
 	model.eval()
-	test_loss = 0.0
-	with torch.no_grad():
-		for X, y, input_lengths, target_lengths in dataloader:
-			log_probs = model(X)
-			log_probs = F.log_softmax(log_probs, dim=-1).transpose(0, 1)
-			test_loss += loss_fn(log_probs, y, input_lengths, target_lengths).item()
-	test_loss /= max(num_batches, 1)
-	print(f"Test Error: \n Avg loss: {test_loss:>8f} \n")
-	return test_loss
+	loss_fn = loss_fn or torch.nn.CTCLoss(blank=0)
+	total_loss = 0.0
+	correct_sequences = 0
+	total_sequences = 0
+	batch_count = 0
+	for batch in dataloader:
+		features, targets, input_lengths, target_lengths = batch
+		features = features.to(device, non_blocking=True)
+		logits = model(features)
+		log_probs = F.log_softmax(logits, dim=-1).transpose(0, 1)
+		total_loss += loss_fn(
+			log_probs,
+			targets.to(device, non_blocking=True),
+			input_lengths.to(device, non_blocking=True),
+			target_lengths.to(device, non_blocking=True),
+		).item()
+
+		predictions = logits.argmax(dim=-1).cpu()
+		for prediction, target, input_length, target_length in zip(
+			predictions, targets, input_lengths, target_lengths
+		):
+			total_sequences += 1
+			collapsed = []
+			previous = None
+			for token in prediction[:input_length].tolist():
+				if token != 0 and token != previous:
+					collapsed.append(token)
+				previous = token
+			expected = target[:target_length].tolist()
+			correct_sequences += int(collapsed == expected)
+		batch_count += 1
+
+	accuracy = correct_sequences / max(total_sequences, 1)
+	return total_loss / max(batch_count, 1), accuracy
 
 
 def main():
-	train_loader = KPdataset.train_loader
-	test_loader = KPdataset.test_loader
+	project_dir = Path(__file__).resolve().parent
+	save_path = project_dir / "best_weights.pth"
+	data_dir = project_dir / "data"
+	train_path = data_dir / "train.csv"
+	validation_path = data_dir / "validation.csv"
+	test_path = data_dir / "test.csv"
 
-	model = KeyPressModel(input_features=KPdataset.dataset.num_features, num_classes=len(KPdataset.dataset.vocabulary)).to(device)
+	model = TNN()
 
-	loss_fn = torch.nn.CTCLoss(blank=0)
-	optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+	if save_path.exists():
+		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))
+		print("loaded saved weights")
 
-	epochs = 2
-	train_losses = []
-	test_losses = []
-	for t in range(epochs):
-		print(f"Epoch {t+1}\n-------------------------------")
-		epoch_train_loss = train(train_loader, model, loss_fn, optimizer)
-		train_losses.append(epoch_train_loss)
-		test_loss = test(test_loader, model, loss_fn)
-		test_losses.append(test_loss)
-		print(f"Epoch {t+1} train loss: {epoch_train_loss:.6f}, test loss: {test_loss:.6f}")
+	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
+	train_dataloader = DataLoader(MotionDataset(train_path), shuffle=True, **loader_kwargs)
+	validation_dataloader = DataLoader(MotionDataset(validation_path), shuffle=False, **loader_kwargs)
+	test_dataloader = DataLoader(MotionDataset(test_path), shuffle=False, **loader_kwargs)
+	print("data loaded")
 
-	print("Saving model to {model_path}")
-	torch.save(model.state_dict(), model_path)
+	trained_model = train_model(
+		model,
+		train_dataloader,
+		epochs=200,
+		validation_dataloader=validation_dataloader,
+	)
 
-	plt.figure(figsize=(8, 5))
-	sns.lineplot(x=list(range(1, len(train_losses) + 1)), y=train_losses, label="Training loss", marker="o")
-	sns.lineplot(x=list(range(1, len(test_losses) + 1)), y=test_losses, label="Test loss", marker="s")
-	plt.xlabel("Epoch")
-	plt.ylabel("Loss")
-	plt.title("Training and Test Loss")
-	plt.legend()
-	plt.tight_layout()
-	plt.show()
-	print("Done!")
+	print("training complete")
+	torch.save(trained_model.state_dict(), save_path)
+
+	loss, accuracy = test_model(trained_model, test_dataloader)
+	print(f"Test Loss: {loss}")
+	print(f"Test Accuracy: {accuracy:.4%}")
+
 
 if __name__ == "__main__":
 	main()
-
-# TODO: Determine num_features in advance.
-# num_classes will be 29 (26 letters + space (_) + no-char (-) + end-char (>) )
-model = KeyPressModel(input_features=KPdataset.dataset.num_features, num_classes=len(KPdataset.dataset.vocabulary)).to(device)
-model.load_state_dict(torch.load(model_path, weights_only=True))
-model.eval()
-
-# TODO use the hand representation they did
-# The input features to the network are frame-to-frame deltas of wrist position and rotation along 
-# with 3D fingertip positions. All positions are represented in the coordinate frame of the keyboard

@@ -3,7 +3,7 @@ import editdistance # pyright: ignore[reportMissingModuleSource]
 from LLM import model as llm
 from TNN import model as tnn
 from BeamSearch import prefix_beam_search
-from dataset import test_data
+from data import test_data
 
 # Run at 60fps
 # If a new keypress has come in from the TNN update the next char
