@@ -30,7 +30,7 @@ class ResidualTCNBlock(torch.nn.Module):
 		return torch.relu(x + residual)
 
 
-class TNN(torch.nn.Module):
+class TCN(torch.nn.Module):
 	def __init__(self, input_features=20, num_classes=None, hidden_channels=(64, 64, 32), kernel_size=2, dilation=3):
 		super().__init__()
 		self.input_features = input_features
@@ -85,7 +85,7 @@ def instantiate_model(
 ):
 	"""Create a KeyPressModel and optionally load weights from a checkpoint."""
 	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-	model = TNN(
+	model = TCN(
 		input_features=input_features,
 		num_classes=num_classes,
 		hidden_channels=hidden_channels,
@@ -100,6 +100,7 @@ def instantiate_model(
 		if isinstance(state_dict, dict) and any(key.startswith("module.") for key in state_dict):
 			state_dict = {key.replace("module.", "", 1): value for key, value in state_dict.items()}
 		model.load_state_dict(state_dict, strict=True)
+	
 	return model
 
 
@@ -226,7 +227,7 @@ def main():
 	validation_path = data_dir / "validation.csv"
 	test_path = data_dir / "test.csv"
 
-	model = TNN()
+	model = TCN()
 
 	if save_path.exists():
 		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))

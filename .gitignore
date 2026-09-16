@@ -1,7 +1,9 @@
 /.vscode
 *.pyc
 *.gguf
+*.pth
 *.npy
 *.uint8
 __pycache__
 .cache
+_cache

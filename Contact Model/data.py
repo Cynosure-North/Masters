@@ -16,10 +16,11 @@ char_to_idx = {ch: i for i, ch in enumerate(chars)}
 idx_to_char = {i: ch for i, ch in enumerate(chars)}
 
 
-class VariableLengthDataset(Dataset):
-	"""Data loader for the long-term decoder.
-	DataLongTerm parses the raw data and extracts
-	(seq. of user input, g.t. seq. of characters) pairs of each full sentence.
+class GeometricDataset(Dataset):
+	"""
+	Data is in the format
+	sentence, list of [normalised x coordinates], list of [normalised y coordinates]
+	One frame is marked as the pressing frame each time a key is pressed, that is what's recorded
 	"""
 	def __init__(self, csv_path, min_length=13, full_sentence=False, augment=False):
 		df = pd.read_csv(csv_path)
@@ -81,13 +82,13 @@ def pad_variable(batch):
 	return sequences_padded, full_labels_padded.long()
 
 def get_dataloader(data_path, batch_size, test=False):
-	dataset = VariableLengthDataset(data_path, full_sentence=False, min_length=9, augment=False)
+	dataset = GeometricDataset(data_path, full_sentence=False, min_length=9, augment=False)
 	return DataLoader(dataset, batch_size=batch_size, shuffle=not test, collate_fn=pad_variable)
 
 ####################################
 
 class MaskedDataset(Dataset):
-	"""Memory-mapped, pre-tokenized version of the benchmark dataset."""
+	"""Memory-mapped, pre-tokenized version of the 1 Billion Words benchmark dataset."""
 
 	DATASET_DIR = Path(r"C:\Users\mno64\Datasets\1-billion-word-benchmark")
 	train_path = DATASET_DIR / "train.txt"
@@ -173,7 +174,7 @@ class MaskedDataset(Dataset):
 
 def preproces():
 	DATA_DIR = Path(__file__).resolve().parent / "data" / "geometric"
-	INPUT_FILE = DATA_DIR / "IMK_data.csv"
+	INPUT_FILE = DATA_DIR / "raw_data.csv"
 	TRAIN_FILE = DATA_DIR / "train.csv"
 	VALIDATION_FILE = DATA_DIR / "validation.csv"
 	TEST_FILE = DATA_DIR / "test.csv"

@@ -85,3 +85,11 @@ def prefix_beam_search(ctc, lm=None, k=25, alpha=0.30, beta=5, prune=0.001):
 		# END: STEP 7
 
 	return A_prev[0].strip('>')
+
+
+# TODO: Interactive mode
+# I'll need to figure out how to collapse old prefixes
+#
+# In this interactive setting we constrained our beam search decoder to force convergence for any
+# predictions older than 6 frames (0.1s) causing all beams to have a common prefix. We only rendered
+# text in the common prefix of all beams, effectively imposing a fixed 0.1s delay.

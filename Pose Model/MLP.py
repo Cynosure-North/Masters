@@ -56,12 +56,7 @@ class Inidiv_PoseMLP(nn.Module):
 
 	def forward(self, inputs):
 		if self.outputs == 0:
-			return 0
-			# TODO
-		if self.outputs == 1:
-			return 1
-			# TODO
-			# return " "
+			raise ValueError("Finger model with no assigned keys called")
 		return self.network(inputs)
 
 class PoseMLP(nn.Module):
@@ -93,8 +88,6 @@ def instantiate_models(model_path, *, inputs=25, nuerons=60):
 	state_dict = torch.load(checkpoint, map_location=device, weights_only=True)
 	model.load_state_dict(state_dict, strict=True)
 	return model.to(device)
-
-
 
 def _key_indices(keys, finger):
 	key_to_index = {key: index for index, key in enumerate(finger_to_keys[finger])}

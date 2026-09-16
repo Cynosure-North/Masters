@@ -6,3 +6,5 @@
 
 
 # TODO: Figure out how to unwrap to curved surface
+
+# TODO: Figure out which finger made contact (for the pose model)

@@ -11,43 +11,28 @@ SEED = 0
 
 
 class PoseDataset(torch.utils.data.Dataset):
+	"""
+	Data is in the format
+	sentence, list of [25 principle component analysis output vectors] for each keypress
+	One frame is marked as the pressing frame each time a key is pressed, that is what's recorded
+	"""
 	def __init__(self, path):
-		self.path = Path(path)
-		if not self.path.exists():
-			raise FileNotFoundError(f"Pose data file not found: {self.path}")
-		frame = pd.read_csv(self.path)
-		if {"key", "finger"}.issubset(frame.columns):
-			feature_columns = [column for column in frame.columns if str(column).lower().startswith(("pc", "principal"))]
-			if len(feature_columns) != 25:
-				feature_columns = list(frame.columns[2:27])
-			key_column, finger_column = "key", "finger"
-		else:
-			if frame.shape[1] < 27:
-				raise ValueError("Pose data must contain key, finger, and 25 PCA columns")
-			key_column, finger_column = frame.columns[:2]
-			feature_columns = list(frame.columns[2:27])
-
-		self.keys = frame[key_column].astype(str).tolist()
-		self.fingers = frame[finger_column].astype(str).tolist()
-		self.features = torch.tensor(
-			frame[feature_columns].apply(pd.to_numeric, errors="coerce").fillna(0.0).to_numpy(dtype=np.float32),
-			dtype=torch.float32,
-		)
-		if self.features.shape[1] != 25:
-			raise ValueError(f"Expected 25 PCA features, found {self.features.shape[1]}")
+		pass
+		# TODO: Pose Dataset
 
 	def __len__(self):
-		return len(self.keys)
+		pass
 
 	def __getitem__(self, idx):
-		return self.keys[idx], self.fingers[idx], self.features[idx]
+		pass
 
 ####################################
 
 def preprocess():
 	data_folder = Path(__file__).parent.parent.joinpath("data")
 	pass
-	# TODO
+	# TODO: preprocess Pose Dataset
+	# Use finger assignment function in main
 
 
 if __name__ == "__main__":
@@ -82,3 +67,4 @@ if __name__ == "__main__":
 	# the standard normal distribution.															Why force things into a normal distribution
 
 # pca, output 25 compontents
+# Unclear if this is per hand or not

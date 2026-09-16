@@ -224,6 +224,12 @@ class LengthBucketBatchSampler(BatchSampler):
 def _mlm_loss(logits, labels, loss_fn):
 	return loss_fn(logits.reshape(-1, logits.size(-1)), labels.reshape(-1))
 
+def checkpoint_path_for(save_path, epoch, batch_count, *, checkpoint_interval=50_000):
+	"""Return a path in the same directory as save_path with a checkpoint-specific basename."""
+	save_path = Path(save_path)
+	checkpoint_step = batch_count / checkpoint_interval
+	return save_path.with_name(f"{save_path.stem}_{epoch}_{checkpoint_step}{save_path.suffix}")
+
 def train_model(
 	model,
 	dataloader,
@@ -237,6 +243,8 @@ def train_model(
 	loss_fn=None,
 	use_amp=True,
 	use_compile=False,
+	save_path=None,
+	checkpoint_interval=50_000,
 ):
 	"""Train a character MLM and return average loss for each epoch."""
 	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -289,15 +297,20 @@ def train_model(
 			batch_loss = loss.detach().item()
 
 			if batch_count % 500 == 0: print(f"batch {batch_count} of epoch {epoch} finished -- loss: {batch_loss}")
-			if batch_count % 50000 == 0: 
+			if save_path is not None and batch_count % checkpoint_interval == 0:
+				checkpoint = checkpoint_path_for(save_path, epoch, batch_count, checkpoint_interval=checkpoint_interval)
+				torch.save(model.state_dict(), checkpoint)
+				print(f"Saved checkpoint, epoch: {epoch} batch {batch_count / checkpoint_interval}")
 
-				# TODO: It'd be nice to take save path as a parameter and only change the basename
-				torch.save(model.state_dict(), f"C:\\Users\\mno64\\Thesis\\Contact Model\\trained\\BERT_{epoch}_{batch_count/50_000}.pth")
-				print(f"Saved checkpoint, epoch: {epoch} batch {batch_count/50_000}")
-
-				# Store the most recent 2 checkpoints, cleanup past ones to save memory
-				
-				Path(f"C:\\Users\\mno64\\Thesis\\Contact Model\\trained\\BERT_{epoch}_{(batch_count-100_000)/50_000}.pth").unlink(missing_ok=True)
+				# Keep the most recent checkpoint in the current save directory while
+				# preserving the configured basename pattern for the active run.
+				previous_checkpoint = checkpoint_path_for(
+					save_path,
+					epoch,
+					max(batch_count - checkpoint_interval, 0),
+					checkpoint_interval=checkpoint_interval,
+				)
+				previous_checkpoint.unlink(missing_ok=True)
 
 
 		if batch_count == 0:
@@ -395,7 +408,7 @@ def main():
 	)
 	print("data loaded")
 
-	trained_model = train_model(model, dataloader, tokenizer, use_amp=True, use_compile=False)
+	trained_model = train_model(model, dataloader, tokenizer, use_amp=True, use_compile=False, save_path=save_path)
 
 	print("training complete")
 	torch.save(trained_model.state_dict(), save_path)

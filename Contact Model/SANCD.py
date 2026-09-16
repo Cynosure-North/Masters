@@ -5,7 +5,7 @@ from pathlib import Path
 
 import BiGRU
 import BERT
-from data import VariableLengthDataset, pad_variable
+from data import GeometricDataset, pad_variable
 
 
 class SANCD(nn.Module):
@@ -211,8 +211,8 @@ def main():
 	save_path = project_dir / "trained" / "best_SANCD.pth"
 
 	model = SANCD(bigru_path=bigru_path, bert_path=bert_path)
-	train_dataset = VariableLengthDataset(train_path, min_length=9)
-	validation_dataset = VariableLengthDataset(validation_path, min_length=9)
+	train_dataset = GeometricDataset(train_path, min_length=9)
+	validation_dataset = GeometricDataset(validation_path, min_length=9)
 
 	loader_kwargs = {
 		"batch_size": 64,
@@ -238,7 +238,7 @@ def main():
 	print("training complete")
 	torch.save(trained_model.state_dict(), save_path)
 
-	test_dataset = VariableLengthDataset(test_path, min_length=9)
+	test_dataset = GeometricDataset(test_path, min_length=9)
 	test_dataloader = DataLoader(test_dataset, shuffle=False, **loader_kwargs)
 	metrics = test_model(trained_model, test_dataloader)
 	for component, (loss, accuracy) in metrics.items():
