@@ -1,12 +1,13 @@
 # Modified version of this code
 # https://zhaozeyu1995.github.io/CTC-Prefix-Beam-Search-Decoding-Algorithm-with-Language-Model/
+# https://medium.com/corti-ai/ctc-networks-and-language-models-prefix-beam-search-explained-c11d1ee23306
 
-from collections import defaultdict, Counter
-from string import ascii_lowercase
-import re
 import numpy as np
+from collections import defaultdict, Counter
+import re
+from data import chars
 
-def prefix_beam_search(ctc, lm=None, k=25, alpha=0.30, beta=5, prune=0.001):
+def prefix_beam_search(ctc, lm=None, k=100, alpha=0.30, beta=5, prune=0.001):
 	"""
 	Performs prefix beam search on the output of a CTC network.
 
@@ -24,7 +25,7 @@ def prefix_beam_search(ctc, lm=None, k=25, alpha=0.30, beta=5, prune=0.001):
 
 	lm = (lambda l: 1) if lm is None else lm # if no LM is provided, just set to function returning 1
 	W = lambda l: re.findall(r'\w+[\s|>]', l)
-	alphabet = list(ascii_lowercase) + [' ', '>', '%']
+	alphabet = chars + ['-', '>']	# Blank character and end character
 	F = ctc.shape[1]
 	ctc = np.vstack((np.zeros(F), ctc)) # just add an imaginative zero'th step (will make indexing more intuitive)
 	T = ctc.shape[0]
@@ -52,7 +53,7 @@ def prefix_beam_search(ctc, lm=None, k=25, alpha=0.30, beta=5, prune=0.001):
 				# END: STEP 2
 				
 				# STEP 3: “Extending” with a blank
-				if c == '%':
+				if c == '-':
 					Pb[t][l] += ctc[t][-1] * (Pb[t - 1][l] + Pnb[t - 1][l])
 				# END: STEP 3
 				

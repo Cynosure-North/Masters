@@ -74,13 +74,6 @@ import TCN
 from BeamSearch import prefix_beam_search
 from data import MotionDataset
 
-# controls the balance between the LLM and the TNN, lower is biased towards the LLM
-alpha =  0.5
-# LLM compensation factor (usually 4-14)
-beta = 10
-# number of branches to keep alive, they use 100
-beam_width = 100
-
 def interactive(tnn, llm):
 	pass
 	# TODO: Interactive mode
@@ -106,7 +99,7 @@ def test():
 
 	for data, label in loader:
 		tnn_prediction = tcn(data)
-		prediction = prefix_beam_search(tnn_prediction, llm, beam_width, alpha, beta)
+		prediction = prefix_beam_search(tnn_prediction, llm)
 
 		levenshtein = editdistance.eval(prediction, label)
 		total_length += len(label)
