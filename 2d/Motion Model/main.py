@@ -71,12 +71,12 @@ from pathlib import Path
 
 import LLM
 import TCN
-from BeamSearch import prefix_beam_search
+from BeamSearch import incremental_prefix_beam_search
 from data import MotionDataset
 
 def interactive(tnn, llm):
 	pass
-	# TODO: Interactive mode
+	# TODO: Interactive mode for motion
 	# Run at 60fps
 	# If a new keypress has come in from the TNN update the next char
 	# Else use the off-frames to run the llm in batches (of 4?) to manage performance
@@ -99,7 +99,7 @@ def test():
 
 	for data, label in loader:
 		tnn_prediction = tcn(data)
-		prediction = prefix_beam_search(tnn_prediction, llm)
+		prediction = incremental_prefix_beam_search(tnn_prediction, llm)
 
 		levenshtein = editdistance.eval(prediction, label)
 		total_length += len(label)

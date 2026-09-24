@@ -50,7 +50,7 @@ from data import PoseDataset
 
 def interactive():
 	pass
-	# TODO: Interactive mode
+	# TODO: Interactive mode for pose
 
 @torch.no_grad()
 def test():

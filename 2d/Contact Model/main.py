@@ -91,7 +91,7 @@ import SANCD
 
 def interactive():
 	pass
-	# TODO: Interactive mode
+	# TODO: Interactive mode for contact
 
 def train():
 	"""Train the component models before fine-tuning the complete SANCD model."""

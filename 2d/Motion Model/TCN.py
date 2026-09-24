@@ -7,13 +7,12 @@ from data import MotionDataset, chars
 class ResidualTCNBlock(torch.nn.Module):
 	def __init__(self, in_channels, out_channels, kernel_size=2, dilation=3):
 		super().__init__()
-		padding = (kernel_size - 1) * dilation
 		self.conv1 = torch.nn.utils.parametrizations.weight_norm(torch.nn.Conv1d(in_channels, out_channels, kernel_size, dilation=dilation))
 		self.conv2 = torch.nn.utils.parametrizations.weight_norm(torch.nn.Conv1d(out_channels, out_channels, kernel_size, dilation=dilation))
 		self.norm1 = torch.nn.GroupNorm(1, out_channels)
 		self.norm2 = torch.nn.GroupNorm(1, out_channels)
 		self.projection = torch.nn.Conv1d(in_channels, out_channels, kernel_size=1) if in_channels != out_channels else None
-		self.padding = padding
+		self.padding = (kernel_size - 1) * dilation
 
 	def forward(self, x):
 		residual = x
@@ -22,7 +21,8 @@ class ResidualTCNBlock(torch.nn.Module):
 
 		x = torch.nn.functional.pad(x, (self.padding, 0))
 		x = self.conv1(x)
-		x = torch.relu(self.norm1(x))
+		x = self.norm1(x)
+		x = torch.relu(x)
 
 		x = torch.nn.functional.pad(x, (self.padding, 0))
 		x = self.conv2(x)
@@ -31,35 +31,26 @@ class ResidualTCNBlock(torch.nn.Module):
 
 
 class TCN(torch.nn.Module):
-	def __init__(self, input_features=20, num_classes=None, hidden_channels=(64, 64, 32), kernel_size=2, dilation=3):
+	# num_classes has one extra character for the non-character class (nothing is pressed)
+	def __init__(self, input_features=20, num_classes=len(chars)+1, hidden_channels=(64, 64, 32), kernel_size=2, dilation=3):
 		super().__init__()
-		self.input_features = input_features
-		self.num_classes = num_classes if num_classes is not None else 75
 		self.input_projection = torch.nn.Conv1d(input_features, hidden_channels[0], kernel_size=1)
 		self.blocks = torch.nn.ModuleList([
 			ResidualTCNBlock(hidden_channels[0], hidden_channels[0], kernel_size=kernel_size, dilation=dilation),
 			ResidualTCNBlock(hidden_channels[0], hidden_channels[1], kernel_size=kernel_size, dilation=dilation),
 			ResidualTCNBlock(hidden_channels[1], hidden_channels[2], kernel_size=kernel_size, dilation=dilation),
 		])
-		self.output_projection = torch.nn.Linear(hidden_channels[-1], self.num_classes)
+		self.output_projection = torch.nn.Linear(hidden_channels[-1], num_classes)
 
 	def forward(self, x):
-		if x.dim() == 2:
-			x = x.unsqueeze(1)
-		elif x.dim() != 3:
-			raise ValueError(f"Expected 2D or 3D input, got {x.dim()}D")
-
-		# x: [B, T, F]
-		if x.dim() == 3 and x.shape[1] != self.input_features:
-			x = x.transpose(1, 2)
-		elif x.dim() == 3:
-			x = x.transpose(1, 2)
+		# Convert [Batch, Timestep, Features] to Conv1d's [B, F, T] layout.
+		x = x.transpose(1, 2)
 
 		x = self.input_projection(x)
 		for block in self.blocks:
 			x = block(x)
 
-		# x: [B, C, T]
+		# Convert from [B, Channels, T] back to [B, T, F]
 		x = x.transpose(1, 2)
 		return self.output_projection(x)
 
@@ -78,8 +69,8 @@ def instantiate_model(
 	*,
 	input_features=None,
 	num_classes=None,
-	hidden_channels=(64, 64, 32),
-	kernel_size=2,
+	hidden_channels=None,
+	kernel_size=None,
 	dilation=3,
 	device=None,
 ):

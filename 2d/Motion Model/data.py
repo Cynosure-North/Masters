@@ -17,9 +17,8 @@ class MotionDataset(torch.utils.data.Dataset):
 	"""
 
 	def __init__(self, path):
-		# TODO: Motion dataset
-		# The input features to the network are frame-to-frame deltas of wrist position and rotation along 
-		# with 3D fingertip positions. All positions are represented in the coordinate frame of the keyboard
+		# TODO: Dataset for motion
+		# labels in the format [a, b, c, ..., -]
 		pass
 
 	def __len__(self):
@@ -30,9 +29,15 @@ class MotionDataset(torch.utils.data.Dataset):
 
 ####################################
 
+def transform():
+	pass
+	# TODO: transform for motion
+	# The input features to the network are frame-to-frame deltas of wrist position and rotation along 
+	# with 3D fingertip positions. All positions are represented in the coordinate frame of the keyboard
+
 def preprocess(path):
 	pass
-	# TODO: preprocess Motion Dataset
+	# TODO: preprocess for motion
 
 if __name__ == "__main__":
 	preprocess()
