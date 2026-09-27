@@ -2,95 +2,124 @@
 # https://zhaozeyu1995.github.io/CTC-Prefix-Beam-Search-Decoding-Algorithm-with-Language-Model/
 # https://medium.com/corti-ai/ctc-networks-and-language-models-prefix-beam-search-explained-c11d1ee23306
 
-import numpy as np
-from collections import defaultdict, Counter
+from collections import Counter, deque
+import editdistance # pyright: ignore[reportMissingModuleSource]
 import re
 from data import chars
 
-def prefix_beam_search(ctc, lm=None, k=100, alpha=0.30, beta=5, prune=0.001):
-	"""
-	Performs prefix beam search on the output of a CTC network.
 
+alphabet = chars + ['-', '>']	# Blank character and end character
+num_features = len(chars) + 1	# Also the non-character (when no key is pressed)
+convergence_delay=6
+
+# Init
+prev_Pb, prev_Pnb = Counter(), Counter()
+prev_Pb[''] = 1		# Probability of blank character
+prev_Pnb[''] = 0		# Probability of non-blank character
+previous_prefixes = deque(maxlen=convergence_delay)
+previous_prefixes.append([''])
+
+
+def incremental_prefix_beam_search(
+	ctc,
+	lm=None,
+	*,
+	k=100,
+	alpha=0.30,
+	beta=5,		# TODO: Tune this
+	prune=0.001,
+):
+	"""
 	Args:
-		ctc (np.ndarray): The CTC output. Should be a 2D array (timesteps x alphabet_size)
+		ctc (array): The CTC output from the latest frame. Should be a 1D array (alphabet_size + '-')
 		lm (func): Language model function. Should take as input a string and output a probability.
 		k (int): The beam width. Will keep the 'k' most likely candidates at each timestep.
 		alpha (float): The language model weight. Should usually be between 0 and 1.
 		beta (float): The language model compensation term. The higher the 'alpha', the higher the 'beta'.
 		prune (float): Only extend prefixes with chars with an emission probability higher than 'prune'.
 
-	Retruns:
+	Returns:
 		string: The decoded CTC output.
 	"""
+	global prev_Pb, prev_Pnb, previous_prefixes
 
-	lm = (lambda l: 1) if lm is None else lm # if no LM is provided, just set to function returning 1
-	W = lambda l: re.findall(r'\w+[\s|>]', l)
-	alphabet = chars + ['-', '>']	# Blank character and end character
-	F = ctc.shape[1]
-	ctc = np.vstack((np.zeros(F), ctc)) # just add an imaginative zero'th step (will make indexing more intuitive)
-	T = ctc.shape[0]
+	pruned_alphabet = [alphabet[i] for i in ctc if i > prune]
+	Pb, Pnb = Counter(), Counter()
+	blank_prob = ctc[-1]
 
-	# STEP 1: Initiliazation
-	empty = ''
-	Pb, Pnb = defaultdict(Counter), defaultdict(Counter)
-	Pb[0][empty] = 1
-	Pnb[0][empty] = 0
-	A_prev = [empty]
-	# END: STEP 1
+	for prefix in previous_prefixes[-1]:
+		
+		# Once you hit the end character stick with that
+		if prefix[-1] == '>' and len(prefix) > 0:
+			Pb[prefix] = prev_Pb[prefix]
+			Pnb[prefix] = prev_Pnb[prefix]
+			continue  
 
-	# STEP 2: Iterations and pruning
-	for t in range(1, T):
-		pruned_alphabet = [alphabet[i] for i in np.where(ctc[t] > prune)[0]]
-		for l in A_prev:
+		for c in pruned_alphabet:
+			char_prob = ctc[alphabet.index(c)]
+			extended = prefix + c
 			
-			if len(l) > 0 and l[-1] == '>':
-				Pb[t][l] = Pb[t - 1][l]
-				Pnb[t][l] = Pnb[t - 1][l]
-				continue  
+			# Extending with a blank
+			if c == '-':
+				Pb[prefix] += blank_prob * (prev_Pb[prefix] + prev_Pnb[prefix])
+			
+			else:
+				# Extending with the previous character
+				if c == prefix[-1] and len(prefix) > 0:
+					Pnb[extended] += char_prob * prev_Pb[prefix]
+					Pnb[prefix] += char_prob * prev_Pnb[prefix]
 
-			for c in pruned_alphabet:
-				c_ix = alphabet.index(c)
-				# END: STEP 2
-				
-				# STEP 3: “Extending” with a blank
-				if c == '-':
-					Pb[t][l] += ctc[t][-1] * (Pb[t - 1][l] + Pnb[t - 1][l])
-				# END: STEP 3
-				
-				# STEP 4: Extending with the end character
+				# Extending with space/end character - triggers LM likelihood check
+				elif c in (' ', '>') and len(prefix.replace(' ', '')) > 0:
+					# With a convergence_delay of only a handful of frames I'm unsure how much
+					# this can really do
+					lm_prob = lm(extended.strip(' >')) ** alpha
+					Pnb[extended] += lm_prob * char_prob * (prev_Pb[prefix] + prev_Pnb[prefix])
+				# Extending with any other character
 				else:
-					l_plus = l + c
-					if len(l) > 0 and c == l[-1]:
-						Pnb[t][l_plus] += ctc[t][c_ix] * Pb[t - 1][l]
-						Pnb[t][l] += ctc[t][c_ix] * Pnb[t - 1][l]
-				# END: STEP 4
+					Pnb[extended] += char_prob * (prev_Pb[prefix] + prev_Pnb[prefix])
 
-					# STEP 5: Extending with any other non-blank character and LM constraints
-					elif len(l.replace(' ', '')) > 0 and c in (' ', '>'):
-						lm_prob = lm(l_plus.strip(' >')) ** alpha
-						Pnb[t][l_plus] += lm_prob * ctc[t][c_ix] * (Pb[t - 1][l] + Pnb[t - 1][l])
-					else:
-						Pnb[t][l_plus] += ctc[t][c_ix] * (Pb[t - 1][l] + Pnb[t - 1][l])
-					# END: STEP 5
-
-					# STEP 6: Make use of discarded prefixes
-					if l_plus not in A_prev:
-						Pb[t][l_plus] += ctc[t][-1] * (Pb[t - 1][l_plus] + Pnb[t - 1][l_plus])
-						Pnb[t][l_plus] += ctc[t][c_ix] * Pnb[t - 1][l_plus]
-					# END: STEP 6
-
-		# STEP 7: Select most probable prefixes
-		A_next = Pb[t] + Pnb[t]
-		sorter = lambda l: A_next[l] * (len(W(l)) + 1) ** beta
-		A_prev = sorted(A_next, key=sorter, reverse=True)[:k]
-		# END: STEP 7
-
-	return A_prev[0].strip('>')
+				# Make use of discarded prefixes if they're available
+				if extended not in previous_prefixes:
+					Pb[extended] += blank_prob * (prev_Pb[extended] + prev_Pnb[extended])
+					Pnb[extended] += char_prob * prev_Pnb[extended]
 
 
-# TODO: Interactive mode
-# I'll need to figure out how to collapse old prefixes
-#
-# In this interactive setting we constrained our beam search decoder to force convergence for any
-# predictions older than 6 frames (0.1s) causing all beams to have a common prefix. We only rendered
-# text in the common prefix of all beams, effectively imposing a fixed 0.1s delay.
+	current_prefixes = Pb + Pnb
+	word_count = lambda l: re.findall(r'\w+[\s>]', l)
+	scorer = lambda l: current_prefixes[l] * (len(word_count(l)) + 1) ** beta
+		
+	# Force convergence
+	if len(previous_prefixes < convergence_delay):
+		# Select most probable prefixes
+		current_prefixes = sorted(current_prefixes, key=scorer, reverse=True)
+		previous_prefixes.append(current_prefixes[:k])
+		return ''
+
+	# The reason I select prefixes from convergence_delay frames ago is because in the prefixes from
+	# this frame I can't tell when each character was added, so I can't select a stable sub-prefix
+	relevance = {}
+	for old_prefix in previous_prefixes[0]:
+		score = 0
+		for new_prefix in current_prefixes:
+			levenshtein = editdistance.eval(old_prefix, new_prefix)
+			score += (Pb[new_prefix] + Pnb[new_prefix]) * levenshtein
+		relevance[old_prefix] = score * scorer(old_prefix)
+	converged_prefix = sorted(relevance, key=relevance.get, reverse=True)[0]
+
+	# Drop dead paths
+	prev_Pb, prev_Pnb = Counter(), Counter()
+	for k, v in Pb.items():
+		if k.startswith(converged_prefix):
+			prev_Pb[k] = v
+	for k, v in Pnb.items():
+		if k.startswith(converged_prefix):
+			prev_Pnb[k] = v
+	current_prefixes = list(filter(lambda l: l.startswith(converged_prefix), current_prefixes))
+
+	current_prefixes = sorted(current_prefixes, key=scorer, reverse=True)
+	previous_prefixes.append(current_prefixes[:k])
+
+	return previous_prefixes[0][0].strip('>')
+
+	
