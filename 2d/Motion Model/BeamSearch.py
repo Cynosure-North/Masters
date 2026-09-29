@@ -26,7 +26,7 @@ def incremental_prefix_beam_search(
 	*,
 	k=100,
 	alpha=0.30,
-	beta=5,		# TODO: Tune this
+	beta=5,		# TODO: Tune llm compensation factor
 	prune=0.001,
 ):
 	"""
