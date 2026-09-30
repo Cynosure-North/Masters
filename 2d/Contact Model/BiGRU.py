@@ -209,7 +209,7 @@ def test_model(
 	accuracy = total_correct / total_count if total_count else 0.0
 	return total_loss / batch_count, accuracy
 
-def main(_train_dataloader=None, _test_dataloader=None, _validation_dataloader=None, validate=True, _save_path=None):
+def main(_train_dataloader=None, _test_dataloader=None, _validation_dataloader=None, _save_path=None):
 	project_dir = Path(__file__).resolve().parent
 	save_path = _save_path or project_dir / "trained" / "best_weights.pth"
 	data_dir = project_dir / "data"
@@ -225,7 +225,7 @@ def main(_train_dataloader=None, _test_dataloader=None, _validation_dataloader=N
 
 	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
 	train_dataloader = _train_dataloader or DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)
-	validation_dataloader = (_validation_dataloader or DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)) if validate else None
+	validation_dataloader = _validation_dataloader or DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)
 	test_dataloader = _test_dataloader or DataLoader(GeometricDataset(test_path), shuffle=False, **loader_kwargs)
 	print("data loaded")
 

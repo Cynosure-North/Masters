@@ -200,7 +200,7 @@ def test_model(
 	}
 
 
-def main(_train_dataloader=None, _test_dataloader=None, _validation_dataloader=None, validate=True, _bigru_path=None, _save_path=None):
+def main(_train_dataloader=None, _test_dataloader=None, _validation_dataloader=None, _bigru_path=None, _save_path=None):
 	project_dir = Path(__file__).resolve().parent
 	data_dir = project_dir / "data" / "geometric"
 	train_path = data_dir / "train.csv"
@@ -219,7 +219,7 @@ def main(_train_dataloader=None, _test_dataloader=None, _validation_dataloader=N
 		"pin_memory": True,
 	}
 	train_dataloader = _train_dataloader or DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)
-	validation_dataloader = (_validation_dataloader or DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)) if validate else None
+	validation_dataloader = _validation_dataloader or DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)
 	print("data loaded")
 
 	trained_model = train_model(

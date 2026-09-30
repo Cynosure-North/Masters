@@ -17,38 +17,42 @@ csv_path = Path(r"C:\Users\mno64\Datasets\tap-typing-with-touch-sensing-images\t
 
 def random_split(path):
 	train_path = path.with_name(f"{path.stem}_train.csv")
+	val_path = path.with_name(f"{path.stem}_val.csv")
 	test_path = path.with_name(f"{path.stem}_test.csv")
 
 	path = Path(path)
 	if not path.exists():
 		raise FileNotFoundError(f"Dataset not found: {path}")
 
-	if not (train_path.exists() and test_path.exists()):
-		with path.open("r", newline="", encoding="utf-8") as f:
+	if not (train_path.exists() and val_path.exists() and test_path.exists()):
+		with path.open("r", newline="", encoding="utf-8-sig") as f:
 			reader = csv.reader(f)
 			rows = list(reader)
-
-		if len(rows) < 2:
-			raise ValueError(f"CSV file has no data rows: {path}")
 
 		header = rows[0]
 		data_rows = rows[1:]
 
-		rng = random.Random(42)
+		rng = random.Random(0)
 		rng.shuffle(data_rows)
 
-		split_idx = max(1, int(len(data_rows) * 0.8))
-		train_rows = data_rows[:split_idx]
-		test_rows = data_rows[split_idx:]
+		train_end = max(1, int(len(data_rows) * 0.7))
+		val_end = max(train_end + 1, int(len(data_rows) * 0.85))
 
+		train_rows = data_rows[:train_end]
+		val_rows = data_rows[train_end:val_end]
+		test_rows = data_rows[val_end:]
 
-		for output_path, rows_to_write in [(train_path, train_rows), (test_path, test_rows)]:
+		for output_path, rows_to_write in [
+			(train_path, train_rows),
+			(val_path, val_rows),
+			(test_path, test_rows),
+		]:
 			with output_path.open("w", newline="", encoding="utf-8") as f:
 				writer = csv.writer(f)
 				writer.writerow(header)
 				writer.writerows(rows_to_write)
 
-	return train_path, test_path
+	return train_path, val_path, test_path
 
 
 class PoseDataset(Dataset):
@@ -57,7 +61,7 @@ class PoseDataset(Dataset):
 		self.features = []
 		self.labels = []
 
-		with self.path.open("r", newline="", encoding="utf-8") as f:
+		with self.path.open("r", newline="", encoding="utf-8-sig") as f:
 			reader = csv.DictReader(f)
 			for row in reader:
 				x = float(row[" first_frame_touch_x"]) / 1440.0
@@ -76,28 +80,23 @@ class PoseDataset(Dataset):
 		return len(self.features)
 
 	def __getitem__(self, idx):
-		# Column structure: participant_id, task_id, trial_id, timestamp_ms, ref_char, ref_char_index_in_prompt,
-		# first_frame_touch_x, first_frame_touch_y, first_frame_touch_major, first_frame_touch_minor,
-		# first_frame_touch_orientation, first_frame_touch_heatmap, first_frame_heatmap_overlap_vector,
-		# was_deleted, lm_scores
-		# ref_char is the label
-		# (first_frame_touch_x/1440, first_frame_touch_y/854) is the feature
-		# The other columns aren't needed
-
 		x = torch.tensor(self.features[idx], dtype=torch.float32)
 		y = torch.tensor(self.targets[idx], dtype=torch.long)
 		return x, y
 
 
 def main():
-	train_path, test_path = random_split(csv_path)
+	train_path, val_path, test_path = random_split(csv_path)
 
 	train_dataset = PoseDataset(train_path)
+	val_dataset = PoseDataset(val_path)
 	test_dataset = PoseDataset(test_path)
 
 	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
 	train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
+	val_loader = DataLoader(val_dataset, shuffle=False, **loader_kwargs)
 	test_loader = DataLoader(test_dataset, shuffle=False, **loader_kwargs)
+
 	# NOTE: I wonder if there are issues from using the same training+test data for both models
 
 	project_dir = Path(__file__).resolve().parent
@@ -105,9 +104,9 @@ def main():
 	sacnd_path = project_dir / "trained" / "test_sacnd_weights.pth"
 
 	print("######### Training BiGRU")
-	BiGRU.main(train_loader, test_loader, _validation_dataloader=None, validate=False, _save_path=bigru_path)
+	BiGRU.main(train_loader, test_loader, _validation_dataloader=val_loader, _save_path=bigru_path)
 	print("######### Training SANDC")
-	SANCD.main(train_loader, test_loader, _validation_dataloader=None, validate=False, _bigru_path=bigru_path, _save_path=sacnd_path)
+	SANCD.main(train_loader, test_loader, _validation_dataloader=val_loader, _bigru_path=bigru_path, _save_path=sacnd_path)
 
 
 if __name__ == "__main__":
