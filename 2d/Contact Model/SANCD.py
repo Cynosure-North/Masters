@@ -200,19 +200,17 @@ def test_model(
 	}
 
 
-def main():
+def main(_train_dataloader=None, _test_dataloader=None, _validation_dataloader=None, validate=True, _bigru_path=None, _save_path=None):
 	project_dir = Path(__file__).resolve().parent
 	data_dir = project_dir / "data" / "geometric"
 	train_path = data_dir / "train.csv"
 	validation_path = data_dir / "validation.csv"
 	test_path = data_dir / "test.csv"
-	bigru_path = project_dir / "trained" / "best_BiGRU.pth"
+	bigru_path = _bigru_path or project_dir / "trained" / "best_BiGRU.pth"
 	bert_path = project_dir / "trained" / "best_BERT.pth"
-	save_path = project_dir / "trained" / "best_SANCD.pth"
+	save_path = _save_path or project_dir / "trained" / "best_SANCD.pth"
 
 	model = SANCD(bigru_path=bigru_path, bert_path=bert_path)
-	train_dataset = GeometricDataset(train_path, min_length=9)
-	validation_dataset = GeometricDataset(validation_path, min_length=9)
 
 	loader_kwargs = {
 		"batch_size": 64,
@@ -220,8 +218,8 @@ def main():
 		"num_workers": 2,
 		"pin_memory": True,
 	}
-	train_dataloader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
-	validation_dataloader = DataLoader(validation_dataset, shuffle=False, **loader_kwargs)
+	train_dataloader = _train_dataloader or DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)
+	validation_dataloader = (_validation_dataloader or DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)) if validate else None
 	print("data loaded")
 
 	trained_model = train_model(
@@ -238,8 +236,7 @@ def main():
 	print("training complete")
 	torch.save(trained_model.state_dict(), save_path)
 
-	test_dataset = GeometricDataset(test_path, min_length=9)
-	test_dataloader = DataLoader(test_dataset, shuffle=False, **loader_kwargs)
+	test_dataloader = _test_dataloader or DataLoader(GeometricDataset(test_path), shuffle=False, **loader_kwargs)
 	metrics = test_model(trained_model, test_dataloader)
 	for component, (loss, accuracy) in metrics.items():
 		print(f"{component.title()} Test Loss: {loss:.6f}")

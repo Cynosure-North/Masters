@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from copy import deepcopy
 from pathlib import Path
-from data import chars, MaskedDataset
+from data import chars, GeometricDataset
 
 class BiGRU(nn.Module):
 	def __init__(self, input_size=2, hidden_size=128, num_layers=2, output_size=len(chars)):
@@ -209,9 +209,9 @@ def test_model(
 	accuracy = total_correct / total_count if total_count else 0.0
 	return total_loss / batch_count, accuracy
 
-def main():
+def main(_train_dataloader=None, _test_dataloader=None, _validation_dataloader=None, validate=True, _save_path=None):
 	project_dir = Path(__file__).resolve().parent
-	save_path = project_dir / "best_weights.pth"
+	save_path = _save_path or project_dir / "trained" / "best_weights.pth"
 	data_dir = project_dir / "data"
 	train_path = data_dir / "train.csv"
 	validation_path = data_dir / "validation.csv"
@@ -224,9 +224,9 @@ def main():
 		print("loaded saved weights")
 
 	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
-	train_dataloader = DataLoader(MaskedDataset(train_path), shuffle=True, **loader_kwargs)
-	validation_dataloader = DataLoader(MaskedDataset(validation_path), shuffle=False, **loader_kwargs)
-	test_dataloader = DataLoader(MaskedDataset(test_path), shuffle=False, **loader_kwargs)
+	train_dataloader = _train_dataloader or DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)
+	validation_dataloader = (_validation_dataloader or DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)) if validate else None
+	test_dataloader = _test_dataloader or DataLoader(GeometricDataset(test_path), shuffle=False, **loader_kwargs)
 	print("data loaded")
 
 	trained_model = train_model(
