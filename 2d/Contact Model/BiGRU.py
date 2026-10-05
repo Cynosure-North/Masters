@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from copy import deepcopy
 from pathlib import Path
-from data import chars, GeometricDataset
+from data import chars, pad_variable, GeometricDataset
 
 class BiGRU(nn.Module):
 	def __init__(self, input_size=2, hidden_size=128, num_layers=2, output_size=len(chars)):
@@ -91,15 +91,15 @@ def train_model(
 	for epoch in range(epochs):
 		batch_count = 0
 		epoch_loss = 0
-		for data, label in dataloader:
+		for labels, data in dataloader:
 			# Flatten only at the loss boundary; the recurrent model keeps sequence structure.
 			data = data.to(device, non_blocking=True)
-			label = label.flatten().to(device, non_blocking=True)
+			labels = labels.flatten().to(device, non_blocking=True)
 			optimizer.zero_grad(set_to_none=True)
 			try:
 				with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
 					output = model(data)
-					loss = _loss_for_logits(output, label, loss_fn)
+					loss = _loss_for_logits(output, labels, loss_fn)
 				if not torch.isfinite(loss):
 					raise RuntimeError(f"Non-finite loss at epoch {epoch}: {loss.item()}")
 			except torch._inductor.exc.TritonMissing:
@@ -110,7 +110,7 @@ def train_model(
 				compiled_model = None
 				with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
 					output = model(data)
-					loss = _loss_for_logits(output, label, loss_fn)
+					loss = _loss_for_logits(output, labels, loss_fn)
 
 			scaler.scale(loss).backward()
 			if gradient_clip is not None:
@@ -182,13 +182,13 @@ def test_model(
 	total_count = 0
 	batch_count = 0
 
-	for data, label in dataloader:
+	for labels, data in dataloader:
 		data = data.to(device, non_blocking=True)
-		label = label.flatten().to(device, non_blocking=True)
+		labels = labels.flatten().to(device, non_blocking=True)
 		try:
 			with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
 				output = model(data)
-				loss = _loss_for_logits(output, label, loss_fn)
+				loss = _loss_for_logits(output, labels, loss_fn)
 		except torch._inductor.exc.TritonMissing:
 			if compiled_model is None:
 				raise
@@ -197,25 +197,25 @@ def test_model(
 			compiled_model = None
 			with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
 				output = model(data)
-				loss = _loss_for_logits(output, label, loss_fn)
+				loss = _loss_for_logits(output, labels, loss_fn)
 
 		total_loss += loss.item()
 		batch_count += 1
 		prediction = output.argmax(dim=-1).reshape(-1)
-		valid_labels = label.ne(-100)
-		total_correct += ((prediction == label) & valid_labels).sum().item()
+		valid_labels = labels.ne(-100)
+		total_correct += ((prediction == labels) & valid_labels).sum().item()
 		total_count += valid_labels.sum().item()
 
 	accuracy = total_correct / total_count if total_count else 0.0
 	return total_loss / batch_count, accuracy
 
-def main(_train_dataloader=None, _test_dataloader=None, _validation_dataloader=None, _save_path=None):
+def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=None):
 	project_dir = Path(__file__).resolve().parent
-	save_path = _save_path or project_dir / "trained" / "best_weights.pth"
-	data_dir = project_dir / "data"
-	train_path = data_dir / "train.csv"
-	validation_path = data_dir / "validation.csv"
-	test_path = data_dir / "test.csv"
+	save_path = _save_path or project_dir / "trained" / "best_BiGRU.pth"
+	data_dir = project_dir / "data" / "geometric"
+	train_path = _train_path or data_dir / "train.csv"
+	validation_path = _validation_path or data_dir / "validation.csv"
+	test_path = _test_path or data_dir / "test.csv"
 
 	model = BiGRU()
 
@@ -223,10 +223,10 @@ def main(_train_dataloader=None, _test_dataloader=None, _validation_dataloader=N
 		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))
 		print("loaded saved weights")
 
-	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
-	train_dataloader = _train_dataloader or DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)
-	validation_dataloader = _validation_dataloader or DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)
-	test_dataloader = _test_dataloader or DataLoader(GeometricDataset(test_path), shuffle=False, **loader_kwargs)
+	loader_kwargs = {"batch_size": 64, "collate_fn": pad_variable, "num_workers": 2, "pin_memory": True}
+	train_dataloader = DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)
+	validation_dataloader = DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)
+	test_dataloader = DataLoader(GeometricDataset(test_path), shuffle=False, **loader_kwargs)
 	print("data loaded")
 
 	trained_model = train_model(

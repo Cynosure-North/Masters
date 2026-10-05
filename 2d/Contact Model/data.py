@@ -1,10 +1,5 @@
 import torch
-from torch.utils.data import Dataset, DataLoader
-import pandas as pd
-import numpy as np
 import random
-from random import randint
-import os
 from pathlib import Path
 import numpy as np
 import csv
@@ -16,78 +11,61 @@ char_to_idx = {ch: i for i, ch in enumerate(chars)}
 idx_to_char = {i: ch for i, ch in enumerate(chars)}
 
 
-class GeometricDataset(Dataset):
+class GeometricDataset(torch.utils.data.Dataset):
 	"""
 	Data is in the format
 	sentence, list of [normalised x coordinates], list of [normalised y coordinates]
 	One frame is marked as the pressing frame each time a key is pressed, that is what's recorded
 	"""
-	def __init__(self, csv_path, min_length=13, full_sentence=False, augment=False):
-		df = pd.read_csv(csv_path)
-		self.full_sentence = full_sentence
-		self.min_length = min_length
-		data_file = df[df['length'] >= self.min_length]
-		self.df = data_file
-		self.data_length = self.df.shape[0]
-		self.augment = augment
+	def __init__(self, csv_path):
+		self.path = Path(csv_path)
+		self.labels = []
+		self.features = []
 
-	def process_csv(self, data, idx):
-		# Each row contains comma-separated coordinates and its target character string.
-		sample = data.iloc[idx]
+		with self.path.open("r", newline="", encoding="utf-8") as file:
+			for row in csv.DictReader(file):
 
-		sentence = sample['sentence'][:]
-		x_list = np.asarray(sample['x_list'].split(','), dtype=np.float32)
-		y_list = np.asarray(sample['y_list'].split(','), dtype=np.float32)
-		if len(x_list) != len(y_list) or len(x_list) != len(sentence):
-			raise ValueError(
-				f"Row {idx} has mismatched lengths: "
-				f"x={len(x_list)}, y={len(y_list)}, sentence={len(sentence)}"
-			)
+			# Each row contains comma-separated coordinates and its target character string.
 
-		coordinates = torch.tensor(np.column_stack((x_list, y_list)), dtype=torch.float32)
-		char_list = torch.tensor(np.array([char_to_idx[char] for char in sentence]))
+				sentence = row['sentence'][:]
+				x_list = np.asarray(row['x_list'].strip("[]").split(','), dtype=np.float32)
+				y_list = np.asarray(row['y_list'].strip("[]").split(','), dtype=np.float32)
+				if len(x_list) != len(y_list) or len(x_list) != len(sentence):
+					raise ValueError(
+						f"Row has mismatched lengths: "
+						f"x={len(x_list)}, y={len(y_list)}, sentence={len(sentence)}"
+					)
 
-		return coordinates, char_list
+				coordinates = torch.tensor(np.column_stack((x_list, y_list)), dtype=torch.float32)
+				char_list = torch.tensor([char_to_idx[char] for char in sentence], dtype=torch.long)
+
+				self.labels.append(char_list)
+				self.features.append(coordinates)
+				
 
 	def __getitem__(self, idx):
-		data_arr, label = self.process_csv(self.df, idx)
-		return data_arr, label
+		return self.labels[idx], self.features[idx]
 
 	def __len__(self):
-		return self.data_length
+		return len(self.labels)
 
 def pad_variable(batch):
-	# Padding lets a batch contain variable-length sentences while preserving time order.
-	sorted_batch = sorted(batch, key=lambda x: x[0].shape[0], reverse=True)             # sort the batch in descending order
-	sequences = [x[0] for x in sorted_batch]                                            # length of sequence
-	sequences_padded = torch.nn.utils.rnn.pad_sequence(sequences, batch_first=True)     # pad the sequence
-	labels = [x[1] for x in sorted_batch]
+	# Each sample is (character labels, (x, y) features); models consume features first.
+	sorted_batch = sorted(batch, key=lambda x: x[0].shape[0], reverse=True)
+	labels = [sample[0] for sample in sorted_batch]
+	features = [sample[1] for sample in sorted_batch]
 	labels_padded = torch.nn.utils.rnn.pad_sequence(
 		labels,
 		batch_first=True,
 		padding_value=-100,
 	)
+	features_padded = torch.nn.utils.rnn.pad_sequence(features, batch_first=True)
 
-	if len(sorted_batch[0]) > 2:
-		full_labels = [x[3] for x in sorted_batch]
-		full_labels_padded = torch.nn.utils.rnn.pad_sequence(
-			full_labels,
-			batch_first=True,
-			padding_value=-100,
-		)
-
-	else:
-		full_labels_padded = labels_padded
-
-	return sequences_padded, full_labels_padded.long()
-
-def get_dataloader(data_path, batch_size, test=False):
-	dataset = GeometricDataset(data_path, full_sentence=False, min_length=9, augment=False)
-	return DataLoader(dataset, batch_size=batch_size, shuffle=not test, collate_fn=pad_variable)
+	return labels_padded.long(), features_padded
 
 ####################################
 
-class MaskedDataset(Dataset):
+class MaskedDataset(torch.utils.data.Dataset):
 	"""Memory-mapped, pre-tokenized version of the 1 Billion Words benchmark dataset."""
 
 	DATASET_DIR = Path(r"C:\Users\mno64\Datasets\1-billion-word-benchmark")
@@ -102,11 +80,12 @@ class MaskedDataset(Dataset):
 		self.cache_dir = (
 			Path(cache_dir)
 			if cache_dir is not None
-			else Path(__file__).resolve().parent / "_cache" )
+			else Path(__file__).resolve().parent / "_cache"
+		)
 		name = "train" if train else "test"
-		self.tokens_path = os.path.join(self.cache_dir, f"{name}_tokens.uint8")
-		self.offsets_path = os.path.join(self.cache_dir, f"{name}_offsets.int64.npy")
-		self.signature_path = os.path.join(self.cache_dir, f"{name}_vocab_signature.int64.npy")
+		self.tokens_path = self.cache_dir / f"{name}_tokens.uint8"
+		self.offsets_path = self.cache_dir / f"{name}_offsets.int64.npy"
+		self.signature_path = self.cache_dir / f"{name}_vocab_signature.int64.npy"
 
 		if not self._cache_is_valid():
 			self._build_cache()
@@ -116,7 +95,7 @@ class MaskedDataset(Dataset):
 		self.lengths = np.diff(self._offsets).astype(np.int32, copy=False)
 
 	def _cache_is_valid(self):
-		if not (os.path.exists(self.tokens_path) and os.path.exists(self.offsets_path) and os.path.exists(self.signature_path)):
+		if not (self.tokens_path.exists() and self.offsets_path.exists() and self.signature_path.exists()):
 			return False
 		try:
 			signature = np.load(self.signature_path, allow_pickle=False)
@@ -126,16 +105,16 @@ class MaskedDataset(Dataset):
 
 	def _build_cache(self):
 		# Store token bytes and offsets separately so large corpora can be memory-mapped.
-		os.makedirs(self.cache_dir, exist_ok=True)
+		self.cache_dir.mkdir(parents=True, exist_ok=True)
 		# Invalidate stale cache files when the tokenizer vocabulary changes.
 		for stale_path in (self.tokens_path, self.offsets_path, self.signature_path):
-			if os.path.exists(stale_path):
+			if stale_path.exists():
 				try:
-					os.remove(stale_path)
+					stale_path.unlink()
 				except OSError:
 					pass
 		offsets = [0]
-		with open(self.source_path, "r", encoding="utf-8") as source, open(self.tokens_path, "wb") as target:
+		with self.source_path.open("r", encoding="utf-8") as source, self.tokens_path.open("wb") as target:
 			for line in source:
 				sequence = self.tokenizer.encode(line)
 				if len(sequence) > self.max_length:

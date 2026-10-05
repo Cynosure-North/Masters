@@ -6,6 +6,7 @@ from pathlib import Path
 
 from data import MaskedDataset, chars
 
+SEED = 0
 if torch.cuda.is_available():
 	torch.set_float32_matmul_precision("high")
 
@@ -41,10 +42,12 @@ class CharTokenizer:
 		"""Converts token IDs back to a string."""
 		return "".join([self.idx2char.get(i, "?") for i in ids])
 
-def create_mlm_inputs(input_ids, tokenizer, mask_prob=0.15, generator=None):
+def create_mlm_inputs(input_ids, tokenizer, mask_prob=0.15):
 	"""
 	Applies the BERT 80/10/10 masking logic across non-special character tokens.
 	"""
+	generator = torch.Generator(device=input_ids.device).manual_seed(0)
+
 	labels = input_ids.clone()
 	masked_inputs = input_ids.clone()
 
@@ -82,7 +85,7 @@ def create_mlm_inputs(input_ids, tokenizer, mask_prob=0.15, generator=None):
 
 	# Remaining 10% of selected -> left unchanged in masked_inputs
 
-	return masked_inputs, labels
+	return labels, masked_inputs
 
 class CharBERTForMLM(nn.Module):
 	def __init__(self, vocab_size, d_model=256, nhead=8, num_layers=6, max_len=512, dropout=0.1):
@@ -271,7 +274,7 @@ def train_model(
 			input_ids, padding_mask = _prepare_batch(
 				batch, tokenizer, device, max_length=model.pos_embedding.num_embeddings
 			)
-			masked_input_ids, labels = create_mlm_inputs(input_ids, tokenizer, mask_prob)
+			labels, masked_input_ids= create_mlm_inputs(input_ids, tokenizer, mask_prob)
 
 			optimizer.zero_grad(set_to_none=True)
 			try:
@@ -355,7 +358,7 @@ def test_model(
 		input_ids, padding_mask = _prepare_batch(
 			batch, tokenizer, device, max_length=model.pos_embedding.num_embeddings
 		)
-		masked_input_ids, labels = create_mlm_inputs(
+		labels, masked_input_ids = create_mlm_inputs(
 			input_ids, tokenizer, mask_prob, generator=mask_generator
 		)
 		try:

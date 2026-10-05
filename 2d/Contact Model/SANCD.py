@@ -58,7 +58,6 @@ def train_model(
 	bert_epochs=3,
 	bigru_epochs=3,
 	alternating_epochs=3,
-	alternating_steps=1,
 	bert_optimizer=None,
 	bigru_optimizer=None,
 	device=None,
@@ -79,19 +78,16 @@ def train_model(
 
 	def run_epoch(phase, epoch):
 		model.train()
-		_set_requires_grad(model.bert, phase in ("bert", "alternate"))
-		_set_requires_grad(model.bigru, phase in ("bigru", "alternate"))
+		_set_requires_grad(model.bert, phase == "bert")
+		_set_requires_grad(model.bigru, phase == "bigru")
 		optimizers = (bert_optimizer, bigru_optimizer)
 		epoch_loss = 0.0
 		batch_count = 0
 
-		for batch_count, (data, labels) in enumerate(dataloader, start=1):
+		for batch_count, (labels, data) in enumerate(dataloader, start=1):
 			data = data.to(device, non_blocking=True)
 			labels = labels.to(device, non_blocking=True)
-			if phase == "alternate":
-				active_index = ((batch_count - 1) // alternating_steps) % 2
-			else:
-				active_index = 0 if phase == "bert" else 1
+			active_index = 0 if phase == "bert" else 1
 			optimizer = optimizers[active_index]
 			optimizer.zero_grad(set_to_none=True)
 
@@ -126,12 +122,13 @@ def train_model(
 		[("bert", epoch) for epoch in range(1, bert_epochs + 1)]
 		+ [("bigru", epoch) for epoch in range(bert_epochs + 1, bert_epochs + bigru_epochs + 1)]
 		+ [
-				("alternate", epoch)
-				for epoch in range(
-					bert_epochs + bigru_epochs + 1,
-					bert_epochs + bigru_epochs + alternating_epochs + 1,
-				)
-			]
+			x		# The comprehension below require unfolding
+			for xs in [(("bert", epoch), ("bigru", epoch+1)) for epoch in range(
+				bert_epochs + bigru_epochs + 1,
+				bert_epochs + bigru_epochs + (alternating_epochs*2) + 1,
+				2)]
+			for x in xs
+		]
 	)
 
 	for phase, epoch in phase_schedule:
@@ -171,7 +168,7 @@ def test_model(
 	total_count = 0
 	batch_count = 0
 
-	for data, labels in dataloader:
+	for labels, data in dataloader:
 		data = data.to(device, non_blocking=True)
 		labels = labels.to(device, non_blocking=True)
 
@@ -200,12 +197,12 @@ def test_model(
 	}
 
 
-def main(_train_dataloader=None, _test_dataloader=None, _validation_dataloader=None, _bigru_path=None, _save_path=None):
+def main(_train_path=None, _validation_path=None, _test_path=None, _bigru_path=None, _save_path=None):
 	project_dir = Path(__file__).resolve().parent
 	data_dir = project_dir / "data" / "geometric"
-	train_path = data_dir / "train.csv"
-	validation_path = data_dir / "validation.csv"
-	test_path = data_dir / "test.csv"
+	train_path = _train_path or data_dir / "train.csv"
+	validation_path = _validation_path or data_dir / "validation.csv"
+	test_path = _test_path or data_dir / "test.csv"
 	bigru_path = _bigru_path or project_dir / "trained" / "best_BiGRU.pth"
 	bert_path = project_dir / "trained" / "best_BERT.pth"
 	save_path = _save_path or project_dir / "trained" / "best_SANCD.pth"
@@ -218,8 +215,8 @@ def main(_train_dataloader=None, _test_dataloader=None, _validation_dataloader=N
 		"num_workers": 2,
 		"pin_memory": True,
 	}
-	train_dataloader = _train_dataloader or DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)
-	validation_dataloader = _validation_dataloader or DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)
+	train_dataloader = DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)
+	validation_dataloader = DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)
 	print("data loaded")
 
 	trained_model = train_model(
@@ -236,7 +233,7 @@ def main(_train_dataloader=None, _test_dataloader=None, _validation_dataloader=N
 	print("training complete")
 	torch.save(trained_model.state_dict(), save_path)
 
-	test_dataloader = _test_dataloader or DataLoader(GeometricDataset(test_path), shuffle=False, **loader_kwargs)
+	test_dataloader = DataLoader(GeometricDataset(test_path), shuffle=False, **loader_kwargs)
 	metrics = test_model(trained_model, test_dataloader)
 	for component, (loss, accuracy) in metrics.items():
 		print(f"{component.title()} Test Loss: {loss:.6f}")
