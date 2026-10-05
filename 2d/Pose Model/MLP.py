@@ -16,42 +16,18 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from pathlib import Path
-from data import PoseDataset
-
-
-fingers = ["l_little", "l_ring", "l_middle", "l_index", "l_thumb", "r_little", "r_ring", "r_middle", "r_index", "r_thumb"]
-finger_to_keys = {
-	"l_little": "qaz",
-	"l_ring": "qwsxz",
-	"l_middle": "edcrx",
-	"l_index": "rtgfgcvby",
-	"l_thumb": " ",
-	"r_thumb": " ",
-	"r_index": "yuhjbnmi",
-	"r_middle": "ikm,ol",
-	"r_ring": "lo.p",
-	"r_little": "" }
-
-# key_to_finger = {}
-# for char in 'abcdefghijklmnopqrstuvwxyz':
-# 	tmp = []
-# 	for key, value in finger_to_keys.items():
-# 		if char in value:
-# 			tmp.append(key)
-# 	key_to_finger[char] = tmp
-				
-
+from data import PoseDataset, finger_list, finger_to_keys
 
 
 class Inidiv_PoseMLP(nn.Module):
-	def __init__(self, *, inputs=25, nuerons=60, outputs=9):
+	def __init__(self, *, inputs=25, neurons=60, outputs=9):
 		super().__init__()
 		self.outputs = outputs
 
 		self.network = nn.Sequential(
-			nn.Linear(inputs, nuerons),
+			nn.Linear(inputs, neurons),
 			nn.Sigmoid(),
-			nn.Linear(nuerons, outputs),
+			nn.Linear(neurons, outputs),
 		)
 
 	def forward(self, inputs):
@@ -66,7 +42,7 @@ class PoseMLP(nn.Module):
 		self.models = nn.ModuleDict()
 		if models is None:
 			models = {
-				key: Inidiv_PoseMLP(inputs=inputs, nuerons=neurons, outputs=len(value))
+				key: Inidiv_PoseMLP(inputs=inputs, neurons=neurons, outputs=len(value))
 				for key, value in finger_to_keys.items()
 			}
 		self.models.update(models)
@@ -78,25 +54,16 @@ class PoseMLP(nn.Module):
 			raise KeyError(f"No pose model is configured for finger: {finger}")
 		return self.models[finger](data)
 
-def instantiate_models(model_path, *, inputs=25, nuerons=60):
+def instantiate_models(model_path, *, inputs=25, neurons=60):
 	"""Create the multi-finger model and optionally load a checkpoint."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-	model = PoseMLP(inputs=inputs, neurons=nuerons)
+	model = PoseMLP(inputs=inputs, neurons=neurons)
 	checkpoint = Path(model_path)
 	if not checkpoint.exists():
 		raise FileNotFoundError(f"Model checkpoint not found: {checkpoint}")
 	state_dict = torch.load(checkpoint, map_location=device, weights_only=True)
 	model.load_state_dict(state_dict, strict=True)
 	return model.to(device)
-
-def _key_indices(keys, finger):
-	key_to_index = {key: index for index, key in enumerate(finger_to_keys[finger])}
-	if isinstance(keys, torch.Tensor):
-		return keys.long()
-	try:
-		return torch.tensor([key_to_index[key] for key in keys], dtype=torch.long)
-	except KeyError as error:
-		raise ValueError(f"Key {error.args[0]!r} is not assigned to {finger}") from error
 
 
 def train_model(model, dataloader, *, epochs=10, learning_rate=1e-3,
@@ -108,7 +75,7 @@ def train_model(model, dataloader, *, epochs=10, learning_rate=1e-3,
 	loss_fn = loss_fn or nn.CrossEntropyLoss()
 	optimizers = {
 		finger: torch.optim.Adam(model.models[finger].parameters(), lr=learning_rate)
-		for finger in fingers
+		for finger in finger_list
 		if finger_to_keys[finger]
 	}
 	best_state = None
@@ -119,31 +86,32 @@ def train_model(model, dataloader, *, epochs=10, learning_rate=1e-3,
 		model.train()
 		finger_losses = {finger: [] for finger in optimizers}
 
-		for keys, batch_fingers, features in dataloader:
+		for labels, fingers, features in dataloader:
 			features = features.to(device, non_blocking=True).float()
+			labels = labels.to(device, non_blocking=True).long()
+			
 			for finger, optimizer in optimizers.items():
 				selected = torch.tensor(
-					[current_finger == finger for current_finger in batch_fingers],
+					[current_finger == finger for current_finger in fingers],
 					dtype=torch.bool,
-					device=device,
-				)
+					device=device)
+
 				if not selected.any():
 					continue
-				finger_features = features[selected]
-				finger_keys = _key_indices(
-					[key for key, keep in zip(keys, selected.cpu().tolist()) if keep], finger,
-				).to(device)
+
+				this_finger_features = features[selected]
+				this_finger_labels = labels[selected]
+
 				optimizer.zero_grad(set_to_none=True)
-				loss = loss_fn(model(finger_features, finger), finger_keys)
+				loss = loss_fn(model(this_finger_features, finger), this_finger_labels)
 				loss.backward()
 				optimizer.step()
 				finger_losses[finger].append(loss.item())
 
 		train_loss = {
-			finger: sum(losses) / len(losses)
+			finger: f"{(sum(losses) / len(losses)):.3f}"
 			for finger, losses in finger_losses.items()
-			if losses
-		}
+			if losses }
 
 		if validation_dataloader is None:
 			print(f"Epoch {epoch + 1} -- train loss: {train_loss}")
@@ -159,7 +127,7 @@ def train_model(model, dataloader, *, epochs=10, learning_rate=1e-3,
 				torch.save(best_state, checkpoint_path)
 		else:
 			stale_epochs += 1
-		print(f"Epoch {epoch + 1} -- train loss: {train_loss}, validation loss: {validation_loss:.6f}, validation accuracy: {validation_accuracy:.4%}")
+		print(f"Epoch {epoch + 1:<3.0f} -- train loss: {train_loss}, validation loss: {validation_loss:.4f}, validation accuracy: {validation_accuracy:.4%}")
 		if stale_epochs >= patience:
 			break
 
@@ -179,36 +147,37 @@ def test_model(model, dataloader, *, device=None, loss_fn=None):
 	total_count = 0
 
 	with torch.no_grad():
-		for keys, batch_fingers, features in dataloader:
+		for labels, fingers, features in dataloader:
 			features = features.to(device, non_blocking=True).float()
+			labels = labels.to(device, non_blocking=True).long()
+
 			for finger in fingers:
-				if not finger_to_keys[finger]:
-					continue
 				selected = torch.tensor(
-					[current_finger == finger for current_finger in batch_fingers],
+					[current_finger == finger for current_finger in fingers],
 					dtype=torch.bool,
-					device=device,
-				)
+					device=device)
+
 				if not selected.any():
 					continue
-				finger_keys = _key_indices(
-					[key for key, keep in zip(keys, selected.cpu().tolist()) if keep], finger,
-				).to(device)
-				logits = model(features[selected], finger)
-				batch_size = finger_keys.numel()
-				total_loss += loss_fn(logits, finger_keys).item() * batch_size
-				total_correct += (logits.argmax(dim=-1) == finger_keys).sum().item()
+				
+				this_finger_features = features[selected]
+				this_finger_labels = labels[selected]
+
+				logits = model(this_finger_features, finger)
+				batch_size = this_finger_labels.numel()
+				total_loss += loss_fn(logits, this_finger_labels).item() * batch_size
+				total_correct += (logits.argmax(dim=-1) == this_finger_labels).sum().item()
 				total_count += batch_size
 
 	return total_loss / max(total_count, 1), total_correct / max(total_count, 1)
 
-def main():
+def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=None):
 	project_dir = Path(__file__).resolve().parent
-	save_path = project_dir / "best_weights.pth"
-	data_dir = project_dir / "data"
-	train_path = data_dir / "train.csv"
-	validation_path = data_dir / "validation.csv"
-	test_path = data_dir / "test.csv"
+	data_dir = project_dir / "data" 
+	train_path = _train_path or data_dir / "train.csv"
+	validation_path = _validation_path or data_dir / "validation.csv"
+	test_path = _test_path or data_dir / "test.csv"
+	save_path = _save_path or project_dir / "trained" / "best_MLP.pth"
 
 	model = PoseMLP()
 

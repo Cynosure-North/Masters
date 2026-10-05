@@ -345,7 +345,7 @@ def fit_ellipsoid(points: np.ndarray) -> EllipsoidFit:
 # 	- track contact events so future frames are ignored
 # 	- Determine which finger contacted
 # 	Not sure if its the best place to do it here rather than in the interactive mode functions
-
+# TODO: Report which hand touched
 # TODO: I'll want to store the point of last contact to ensure the keys appear in the right place
 # NOTE: I'll want to fit different surfaces for each hand
 # TODO: Figure out how to integrate this with the AI

@@ -42,7 +42,6 @@
 
 import torch
 from torch.utils.data import DataLoader
-import editdistance # pyright: ignore[reportMissingModuleSource]
 from pathlib import Path
 
 import MLP
@@ -51,37 +50,8 @@ from data import PoseDataset
 def interactive():
 	pass
 	# TODO: Interactive mode for pose
-
-@torch.no_grad()
-def test():
-	project_dir = Path(__file__).resolve().parent
-	model_path = project_dir / "trained" / "model_weights.pth"
-	test_path = project_dir / "data" / "train.csv"
-
-	dataset = PoseDataset(test_path)
-	loader = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=2, pin_memory=True)
-	model = MLP.instantiate_model(model_path).eval()
-
-	total_length
-	err_distance = 0
-	correct_count = 0
-
-	for data, label in loader:
-		prediction = model(data)
-
-		levenshtein = editdistance.eval(prediction, label)
-		total_length += len(label)
-		if prediction == label:
-			correct_count += 1
-		# print(f"CORRECT - {prediction}")
-		else:
-			err_distance += levenshtein
-			# print(f"{levenshtein} - prediction: {prediction}, correct answer {label}")
-
-	word_accuracy = correct_count / len(dataset)
-	distance_accuracy = err_distance / total_length
-	print(f"Test accuracy (Correct phrases) {word_accuracy:.2%}")
-	print(f"Test accuracy (Levenshtien distance) {distance_accuracy:.2%}")
+	# On contact:
+	# 	models[hand](data.transform(input_data))
 
 if __name__ == "__main__":
-	test()
+	interactive()

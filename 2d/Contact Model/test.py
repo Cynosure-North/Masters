@@ -1,4 +1,4 @@
-# Test the BiGRU and SANDC models using an existing datasource to sanity check the implementation
+# Test the BiGRU and SANCD models using an existing datasource to sanity check the implementation
 #
 # Data from https://github.com/google-research-datasets/tap-typing-with-touch-sensing-images
 
@@ -80,7 +80,7 @@ def main():
 
 	print("######### Training BiGRU")
 	BiGRU.main(train_path, val_path, test_path, _save_path=bigru_path)
-	print("######### Training SANDC")
+	print("######### Training SANCD")
 	SANCD.main(train_path, val_path, test_path, _bigru_path=bigru_path, _save_path=sacnd_path)
 
 
