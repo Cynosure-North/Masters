@@ -139,12 +139,10 @@ class CharBERTForMLM(nn.Module):
 		return logits
 
 
-def instantiate_model(model_path=None, *, vocab_size=None, d_model=128, nhead=4, num_layers=3, max_len=512, dropout=0.1, device=None):
+def instantiate_model(model_path=None):
 	"""Create a CharBERTForMLM and optionally load weights from a saved checkpoint path."""
-	if vocab_size is None:
-		vocab_size = len(CharTokenizer())
-	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-	model = CharBERTForMLM(vocab_size=vocab_size, d_model=d_model, nhead=nhead, num_layers=num_layers, max_len=max_len, dropout=dropout)
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+	model = CharBERTForMLM()
 	model.to(device)
 	if model_path is not None:
 		model_path = Path(model_path)
@@ -238,8 +236,6 @@ def train_model(
 	dataloader,
 	tokenizer,
 	epochs=3,
-	optimizer=None,
-	device=None,
 	mask_prob=0.15,
 	gradient_clip=None,
 	scheduler=None,
@@ -250,17 +246,16 @@ def train_model(
 	checkpoint_interval=50_000,
 ):
 	"""Train a character MLM and return average loss for each epoch."""
-	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 	compiled_model = None
 	if use_compile and hasattr(torch, "compile"):
 		compiled_model = model
 		model = torch.compile(model, dynamic=True)
-	if optimizer is None:
-		optimizer_kwargs = {"lr": 1e-4}
-		if device.type == "cuda":
-			optimizer_kwargs["fused"] = True
-		optimizer = torch.optim.AdamW(model.parameters(), **optimizer_kwargs)
+	optimizer_kwargs = {"lr": 1e-4}
+	if device.type == "cuda":
+		optimizer_kwargs["fused"] = True
+	optimizer = torch.optim.AdamW(model.parameters(), **optimizer_kwargs)
 	loss_fn = loss_fn or nn.CrossEntropyLoss(ignore_index=-100)
 	amp_enabled = use_amp and device.type == "cuda"
 	scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
@@ -330,22 +325,20 @@ def test_model(
 	model,
 	dataloader,
 	tokenizer,
-	device=None,
 	mask_prob=0.15,
-	loss_fn=None,
 	use_amp=True,
 	use_compile=False,
 	seed=0,
 ):
 	"""Evaluate a character MLM and return average loss and masked-token accuracy."""
-	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 	compiled_model = None
 	if use_compile and hasattr(torch, "compile"):
 		compiled_model = model
 		model = torch.compile(model, dynamic=True)
 	model.eval()
-	loss_fn = loss_fn or nn.CrossEntropyLoss(ignore_index=-100)
+	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 	amp_enabled = use_amp and device.type == "cuda"
 	total_loss = 0.0
 	total_correct = 0

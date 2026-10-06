@@ -66,13 +66,20 @@ def instantiate_models(model_path, *, inputs=25, neurons=60):
 	return model.to(device)
 
 
-def train_model(model, dataloader, *, epochs=10, learning_rate=1e-3,
-		device=None, checkpoint_path=None, validation_dataloader=None,
-		patience=3, loss_fn=None):
+def train_model(
+		model,
+		dataloader,
+		*,
+		epochs=10,
+		learning_rate=1e-3,
+		checkpoint_path=None,
+		validation_dataloader=None,
+		patience=3
+		):
 	"""Train all ten finger classifiers on interleaved key/finger datapoints."""
-	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
-	loss_fn = loss_fn or nn.CrossEntropyLoss()
+	loss_fn = nn.CrossEntropyLoss()
 	optimizers = {
 		finger: torch.optim.Adam(model.models[finger].parameters(), lr=learning_rate)
 		for finger in finger_list
@@ -116,9 +123,7 @@ def train_model(model, dataloader, *, epochs=10, learning_rate=1e-3,
 		if validation_dataloader is None:
 			print(f"Epoch {epoch + 1} -- train loss: {train_loss}")
 			continue
-		validation_loss, validation_accuracy = test_model(
-			model, validation_dataloader, device=device, loss_fn=loss_fn
-		)
+		validation_loss, validation_accuracy = test_model(model, validation_dataloader)
 		if validation_loss < best_loss:
 			best_loss = validation_loss
 			best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
@@ -137,11 +142,11 @@ def train_model(model, dataloader, *, epochs=10, learning_rate=1e-3,
 
 
 @torch.no_grad()
-def test_model(model, dataloader, *, device=None, loss_fn=None):
+def test_model(model, dataloader):
 	"""Evaluate each interleaved datapoint with its assigned finger model."""
-	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device).eval()
-	loss_fn = loss_fn or nn.CrossEntropyLoss()
+	loss_fn = nn.CrossEntropyLoss()
 	total_loss = 0.0
 	total_correct = 0
 	total_count = 0

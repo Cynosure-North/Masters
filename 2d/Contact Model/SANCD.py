@@ -58,21 +58,17 @@ def train_model(
 	bert_epochs=3,
 	bigru_epochs=3,
 	alternating_epochs=3,
-	bert_optimizer=None,
-	bigru_optimizer=None,
-	device=None,
 	gradient_clip=None,
-	loss_fn=None,
 	use_amp=True,
 	checkpoint_path=None,
 	validation_dataloader=None,
 ):
 	"""Train BERT, then BiGRU, then alternate between both components."""
-	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
-	loss_fn = loss_fn or nn.CrossEntropyLoss(ignore_index=-100)
-	bert_optimizer = bert_optimizer or torch.optim.AdamW(model.bert.parameters(), lr=1e-4)
-	bigru_optimizer = bigru_optimizer or torch.optim.Adam(model.bigru.parameters(), lr=1e-3)
+	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
+	bert_optimizer = torch.optim.AdamW(model.bert.parameters(), lr=1e-4)
+	bigru_optimizer = torch.optim.Adam(model.bigru.parameters(), lr=1e-3)
 	amp_enabled = use_amp and device.type == "cuda"
 	scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 
@@ -135,7 +131,7 @@ def train_model(
 		run_epoch(phase, epoch)
 		if validation_dataloader is not None:
 			# Report both component losses after every phase epoch.
-			validation_metrics = test_model(model, validation_dataloader, device=device, use_amp=use_amp)
+			validation_metrics = test_model(model, validation_dataloader, use_amp=use_amp)
 			print(
 				f"Validation -- BiGRU loss: {validation_metrics['bigru'][0]:.6f}, "
 				f"BERT loss: {validation_metrics['bert'][0]:.6f}"
@@ -151,15 +147,13 @@ def train_model(
 def test_model(
 	model,
 	dataloader,
-	device=None,
-	loss_fn=None,
 	use_amp=True,
 ):
 	"""Evaluate SANCD and return loss and token accuracy for both components."""
-	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 	model.eval()
-	loss_fn = loss_fn or nn.CrossEntropyLoss(ignore_index=-100)
+	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 	amp_enabled = use_amp and device.type == "cuda"
 	total_bigru_loss = 0.0
 	total_bert_loss = 0.0

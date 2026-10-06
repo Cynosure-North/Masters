@@ -31,12 +31,10 @@ class BiGRU(nn.Module):
 		return out
 
 
-def instantiate_model(model_path=None, *, input_size=2, hidden_size=128, num_layers=2, output_size=None, device=None):
+def instantiate_model(model_path=None):
 	"""Create a BiGRU and optionally load weights from a saved checkpoint path."""
-	if output_size is None:
-		output_size = len(chars)
-	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-	model = BiGRU(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, output_size=output_size)
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+	model = BiGRU()
 	model.to(device)
 	if model_path is not None:
 		# Checkpoints are loaded onto the selected device so CPU evaluation also works.
@@ -63,24 +61,21 @@ def train_model(
 	epochs=3,
 	patience=3,
 	min_delta=0.0,
-	optimizer=None,
 	device=None,
 	gradient_clip=None,
-	loss_fn=None,
 	use_amp=True,
 	use_compile=False,
 	checkpoint_path=None,
 ):
 	"""Train, optionally early-stop on validation loss, and return the model."""
-	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 	compiled_model = None
 	if use_compile and hasattr(torch, "compile"):
 		compiled_model = model
 		model = torch.compile(model, dynamic=True)
-	if optimizer is None:
-		optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-	loss_fn = loss_fn or nn.CrossEntropyLoss(ignore_index=-100)
+	optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 	amp_enabled = use_amp and device.type == "cuda"
 	scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 	best_validation_loss = float("inf")
@@ -162,20 +157,18 @@ def train_model(
 def test_model(
 	model,
 	dataloader,
-	device=None,
-	loss_fn=None,
 	use_amp=True,
 	use_compile=False,
 ):
 	"""Evaluate and return average loss and masked-token accuracy."""
-	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 	compiled_model = None
 	if use_compile and hasattr(torch, "compile"):
 		compiled_model = model
 		model = torch.compile(model, dynamic=True)
 	model.eval()
-	loss_fn = loss_fn or nn.CrossEntropyLoss(ignore_index=-100)
+	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 	amp_enabled = use_amp and device.type == "cuda"
 	total_loss = 0.0
 	total_correct = 0
