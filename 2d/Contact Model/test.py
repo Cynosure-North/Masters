@@ -47,10 +47,14 @@ def random_split(path):
 					rows.append([sentence, xs, ys])
 					sentence, xs, ys = char, [x], [y]
 					task_id, trial_id = task, trial
+			else:
+				sentence += char
+				xs.append(x)
+				ys.append(y)
+				rows.append([sentence, xs, ys])
 
 
-		rng = random.Random(SEED)
-		rng.shuffle(rows)
+		random.Random(SEED).shuffle(rows)
 
 		train_end = max(1, int(len(rows) * 0.7))
 		val_end = max(train_end + 1, int(len(rows) * 0.85))
@@ -59,15 +63,15 @@ def random_split(path):
 		val_rows = rows[train_end:val_end]
 		test_rows = rows[val_end:]
 
-		for output_path, rows_to_write in [
+		for output_path, split_rows in [
 			(train_path, train_rows),
 			(val_path, val_rows),
-			(test_path, test_rows),
-		]:
+			(test_path, test_rows) ]:
+
 			with output_path.open("w", newline="", encoding="utf-8") as f:
 				writer = csv.writer(f)
 				writer.writerow(["sentence", "x_list", "y_list"])
-				writer.writerows(rows_to_write)
+				writer.writerows(split_rows)
 
 	return train_path, val_path, test_path
 
@@ -75,11 +79,14 @@ def main():
 	train_path, val_path, test_path = random_split(csv_path)
 
 	project_dir = Path(__file__).resolve().parent
-	bigru_path = project_dir / "trained" / "test_bigru_weights.pth"
-	sacnd_path = project_dir / "trained" / "test_sacnd_weights.pth"
+	bigru_path = project_dir / "trained" / "test_BiGRU_weights.pth"
+	sacnd_path = project_dir / "trained" / "test_SACND_weights.pth"
 
 	print("######### Training BiGRU")
 	BiGRU.main(train_path, val_path, test_path, _save_path=bigru_path)
+
+	# BERT trains on separate data (even in the final implementation), and can be tested on its own
+	
 	print("######### Training SANCD")
 	SANCD.main(train_path, val_path, test_path, _bigru_path=bigru_path, _save_path=sacnd_path)
 

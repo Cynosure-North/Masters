@@ -1,11 +1,12 @@
 # Test the implementation using data from an existing source
 #
 # Data from https://userinterfaces.aalto.fi/how-we-type/resources/HowWeType_CHI16.pdf
+# NOTE: as published the data is in csv files, despite being in a tsv format. I changed the file extensions to reflect that
 
 import csv
 from pathlib import Path
 import numpy as np
-import data
+from data import chars, transform, calculate_params, MotionDataset
 import MLP
 
 SEED = 0
@@ -15,7 +16,6 @@ dir_path = Path(r"C:\Users\mno64\Datasets\How we type\Motion Capture")
 def random_split(path):
 	path = Path(path)
 	data_dir = path if path.is_dir() else path.parent
-
 	train_path = data_dir / "train.csv"
 	val_path = data_dir / "val.csv"
 	test_path = data_dir / "test.csv"
@@ -86,11 +86,11 @@ def random_split(path):
 
 				for row in reader:
 					stimulus = row["stimulus"] or ""
-					if any(not char.isascii() for char in stimulus):
+					if any(char not in chars for char in stimulus):
 						continue
 
 					key_symbol = row["key_symbol"]
-					if key_symbol not in data.chars:
+					if key_symbol not in chars:
 						continue
 
 					hand_value = (row["right_hand"] or "").strip().lower()
@@ -102,7 +102,7 @@ def random_split(path):
 						continue	 # No button was pressed this frame
 
 					transformed_values = np.asarray(
-						data.transform(row[column] for column in feature_columns),
+						transform([row[column] for column in feature_columns]),
 						dtype=float ).reshape(-1)
 
 					if transformed_values.size != 30:
@@ -120,7 +120,7 @@ def random_split(path):
 		labels = np.asarray([row[:2] for row in rows], dtype=str)
 		feature_matrix = np.asarray([row[2:] for row in rows], dtype=float)
 
-		_, _, transformed_data = data.calculate_params(feature_matrix)
+		_, _, transformed_data = calculate_params(feature_matrix)
 		transformed_data = np.asarray(transformed_data, dtype=float)
 
 		if transformed_data.ndim != 2 or transformed_data.shape != (len(rows), 25):
@@ -130,22 +130,19 @@ def random_split(path):
 			)
 
 		rows = np.column_stack((labels, transformed_data))
-		unshuffled = rows.copy()
 
 		np.random.default_rng(SEED).shuffle(rows)
 
 		train_end = int(len(rows) * 0.7)
 		val_end = train_end + int(len(rows) * 0.15)
-		splits = (
-			(train_path, rows[:train_end]),
-			(val_path, rows[train_end:val_end]),
-			(test_path, rows[val_end:]),
-			(raw_path, unshuffled)
-		)
 
 		output_header = ["label"] + ["finger"] + [f"feature_{index}" for index in range(25)]
 
-		for output_path, split_rows in splits:
+		for output_path, split_rows in (
+			(train_path, rows[:train_end]),
+			(val_path, rows[train_end:val_end]),
+			(test_path, rows[val_end:])):
+
 			with output_path.open('w', encoding="utf-8", newline='') as output:
 				writer = csv.writer(output, delimiter=",")
 				writer.writerow(output_header)
@@ -160,7 +157,12 @@ def random_split(path):
 def main():
 	train_path, val_path, test_path = random_split(dir_path)
 
-	MLP.main(train_path, val_path, test_path)
+	project_dir = Path(__file__).resolve().parent
+	save_path = project_dir / "trained" / "test_MLP_weights.pth"
+
+	MLP.main(train_path, val_path, test_path, save_path)
 
 if __name__ == "__main__":
 	main()
+
+# TODO: The test accuracy for the pose model is way lower than was reported in the paper, I wonder if it's because of the dataset I'm using?

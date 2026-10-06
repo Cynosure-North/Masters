@@ -99,7 +99,7 @@ def transform(data, online_scaling=False):
 	"""
 	
 	try:
-		points = np.asarray(list(data), dtype=float).reshape(12, 3)
+		points = np.asarray(data, dtype=float).reshape(12, 3)
 	except (TypeError, ValueError) as err:
 		raise ValueError("Expected 36 numeric coordinates (12 points * 3 axes)") from err
 
