@@ -347,7 +347,8 @@ def fit_ellipsoid(points: np.ndarray) -> EllipsoidFit:
 # 	Not sure if its the best place to do it here rather than in the interactive mode functions
 # TODO: Report which hand touched
 # TODO: I'll want to store the point of last contact to ensure the keys appear in the right place
-# NOTE: I'll want to fit different surfaces for each hand
+# TODO: I'll want to fit different surfaces for each hand
+#	Not sure how that will work with the motion model
 # TODO: Figure out how to integrate this with the AI
 # 	- Convert to UVs?
 #		- But that would loose orientation and topology
