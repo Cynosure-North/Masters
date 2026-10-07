@@ -54,16 +54,19 @@ class PoseMLP(nn.Module):
 			raise KeyError(f"No pose model is configured for finger: {finger}")
 		return self.models[finger](data)
 
-def instantiate_models(model_path, *, inputs=25, neurons=60):
+def instantiate_models(model_path):
 	"""Create the multi-finger model and optionally load a checkpoint."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-	model = PoseMLP(inputs=inputs, neurons=neurons)
-	checkpoint = Path(model_path)
-	if not checkpoint.exists():
-		raise FileNotFoundError(f"Model checkpoint not found: {checkpoint}")
-	state_dict = torch.load(checkpoint, map_location=device, weights_only=True)
-	model.load_state_dict(state_dict, strict=True)
-	return model.to(device)
+	model = PoseMLP().to(device)
+
+	model_path = Path(model_path)
+	if model_path.exists():
+		state_dict = torch.load(model_path, map_location=device, weights_only=True)
+		model.load_state_dict(state_dict, strict=True)
+	else:
+		raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
+
+	return model
 
 
 def train_model(

@@ -32,7 +32,7 @@ class ResidualTCNBlock(torch.nn.Module):
 
 class TCN(torch.nn.Module):
 	# num_classes has one extra character for the non-character class (nothing is pressed)
-	def __init__(self, input_features=20, num_classes=len(chars)+1, hidden_channels=(64, 64, 32), kernel_size=2, dilation=3):
+	def __init__(self, input_features=42, num_classes=len(chars)+1, hidden_channels=(64, 64, 32), kernel_size=2, dilation=3):
 		super().__init__()
 		self.input_projection = torch.nn.Conv1d(input_features, hidden_channels[0], kernel_size=1)
 		self.blocks = torch.nn.ModuleList([
@@ -64,45 +64,32 @@ def collate_batch(batch):
 	return padded_features, padded_targets, input_lengths, target_lengths
 
 
-def instantiate_model(
-	model_path=None,
-	*,
-	input_features=None,
-	num_classes=None,
-	hidden_channels=None,
-	kernel_size=None,
-	dilation=3,
-	device=None,
-):
+def instantiate_model(model_path):
 	"""Create a KeyPressModel and optionally load weights from a checkpoint."""
-	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-	model = TCN(
-		input_features=input_features,
-		num_classes=num_classes,
-		hidden_channels=hidden_channels,
-		kernel_size=kernel_size,
-		dilation=dilation,
-	).to(device)
-	if model_path is not None:
-		model_path = Path(model_path)
-		if not model_path.exists():
-			raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+	model = TCN().to(device)
+
+	model_path = Path(model_path)
+	if model_path.exists():
 		state_dict = torch.load(model_path, map_location=device, weights_only=True)
 		if isinstance(state_dict, dict) and any(key.startswith("module.") for key in state_dict):
 			state_dict = {key.replace("module.", "", 1): value for key, value in state_dict.items()}
-		model.load_state_dict(state_dict, strict=True)
+	else:
+		raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
+
+	model.load_state_dict(state_dict, strict=True)
 	
 	return model
 
 
-def _ctc_loss(model, batch, loss_fn, device):
+def _ctc_loss(model, batch, device):
 	features, targets, input_lengths, target_lengths = batch
 	features = features.to(device, non_blocking=True)
 	targets = targets.to(device, non_blocking=True)
 	input_lengths = input_lengths.to(device, non_blocking=True)
 	target_lengths = target_lengths.to(device, non_blocking=True)
 	log_probs = F.log_softmax(model(features), dim=-1).transpose(0, 1)
-	return loss_fn(log_probs, targets, input_lengths, target_lengths)
+	return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0)
 
 
 def train_model(
@@ -110,18 +97,15 @@ def train_model(
 	dataloader,
 	validation_dataloader=None,
 	epochs=3,
-	patience=3,
+	patience=5,
 	min_delta=0.0,
-	optimizer=None,
-	device=None,
 	gradient_clip=None,
-	loss_fn=None,
 	checkpoint_path=None,
 ):
-	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+	
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
-	optimizer = optimizer or torch.optim.Adam(model.parameters(), lr=1e-3)
-	loss_fn = loss_fn or torch.nn.CTCLoss(blank=0)
+	optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 	best_validation_loss = float("inf")
 	best_state = None
 	stale_epochs = 0
@@ -132,7 +116,18 @@ def train_model(
 		batch_count = 0
 		for batch in dataloader:
 			optimizer.zero_grad(set_to_none=True)
-			loss = _ctc_loss(model, batch, loss_fn, device)
+
+			features, targets, input_lengths, target_lengths = batch
+			features = features.to(device, non_blocking=True)
+			loss = F.ctc_loss(
+				F.log_softmax(
+					model(features.to(device, non_blocking=True)),
+					dim=-1).transpose(0, 1),
+				targets.to(device, non_blocking=True),
+				input_lengths.to(device, non_blocking=True),
+				target_lengths.to(device, non_blocking=True)
+			)
+			_ctc_loss(model, batch, device)
 			if not torch.isfinite(loss):
 				raise RuntimeError(f"Non-finite loss at epoch {epoch}: {loss.item()}")
 			loss.backward()
@@ -146,7 +141,7 @@ def train_model(
 		message = f"Epoch {epoch} -- train loss: {epoch_loss:.6f}"
 
 		if validation_dataloader is not None:
-			validation_loss, _ = test_model(model, validation_dataloader, device=device, loss_fn=loss_fn)
+			validation_loss, _ = test_model(model, validation_dataloader)
 			message += f", validation loss: {validation_loss:.6f}"
 			if validation_loss < best_validation_loss - min_delta:
 				best_validation_loss = validation_loss
@@ -170,11 +165,10 @@ def train_model(
 
 
 @torch.no_grad()
-def test_model(model, dataloader, device=None, loss_fn=None):
-	device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+def test_model(model, dataloader):
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 	model.eval()
-	loss_fn = loss_fn or torch.nn.CTCLoss(blank=0)
 	total_loss = 0.0
 	correct_sequences = 0
 	total_sequences = 0
@@ -184,17 +178,17 @@ def test_model(model, dataloader, device=None, loss_fn=None):
 		features = features.to(device, non_blocking=True)
 		logits = model(features)
 		log_probs = F.log_softmax(logits, dim=-1).transpose(0, 1)
-		total_loss += loss_fn(
+		total_loss += F.ctc_loss(
 			log_probs,
 			targets.to(device, non_blocking=True),
 			input_lengths.to(device, non_blocking=True),
-			target_lengths.to(device, non_blocking=True),
+			target_lengths.to(device, non_blocking=True)
 		).item()
 
 		predictions = logits.argmax(dim=-1).cpu()
 		for prediction, target, input_length, target_length in zip(
-			predictions, targets, input_lengths, target_lengths
-		):
+			predictions, targets, input_lengths, target_lengths):
+
 			total_sequences += 1
 			collapsed = []
 			previous = None
@@ -210,13 +204,13 @@ def test_model(model, dataloader, device=None, loss_fn=None):
 	return total_loss / max(batch_count, 1), accuracy
 
 
-def main():
+def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=None):
 	project_dir = Path(__file__).resolve().parent
-	save_path = project_dir / "best_weights.pth"
+	save_path = _save_path or project_dir / "trained" / "best_TCNe.pth"
 	data_dir = project_dir / "data"
-	train_path = data_dir / "train.csv"
-	validation_path = data_dir / "validation.csv"
-	test_path = data_dir / "test.csv"
+	train_path = _train_path or data_dir / "train"
+	validation_path = _validation_path or data_dir / "validation"
+	test_path = _test_path or data_dir / "test"
 
 	model = TCN()
 
@@ -225,9 +219,15 @@ def main():
 		print("loaded saved weights")
 
 	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
-	train_dataloader = DataLoader(MotionDataset(train_path), shuffle=True, **loader_kwargs)
-	validation_dataloader = DataLoader(MotionDataset(validation_path), shuffle=False, **loader_kwargs)
-	test_dataloader = DataLoader(MotionDataset(test_path), shuffle=False, **loader_kwargs)
+	train_dataloader = DataLoader(
+		MotionDataset(train_path), shuffle=True, collate_fn=collate_batch, **loader_kwargs
+	)
+	validation_dataloader = DataLoader(
+		MotionDataset(validation_path), shuffle=False, collate_fn=collate_batch, **loader_kwargs
+	)
+	test_dataloader = DataLoader(
+		MotionDataset(test_path), shuffle=False, collate_fn=collate_batch, **loader_kwargs
+	)
 	print("data loaded")
 
 	trained_model = train_model(

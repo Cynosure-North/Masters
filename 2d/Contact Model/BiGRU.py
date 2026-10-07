@@ -31,21 +31,21 @@ class BiGRU(nn.Module):
 		return out
 
 
-def instantiate_model(model_path=None):
-	"""Create a BiGRU and optionally load weights from a saved checkpoint path."""
+def instantiate_model(model_path):
+	"""Create a BiGRU and load weights from a saved checkpoint path."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-	model = BiGRU()
-	model.to(device)
-	if model_path is not None:
-		# Checkpoints are loaded onto the selected device so CPU evaluation also works.
-		model_path = Path(model_path)
-		if model_path.exists():
-			state_dict = torch.load(model_path, map_location=device, weights_only=False)
-			if isinstance(state_dict, dict) and any(k.startswith("module.") for k in state_dict):
-				state_dict = {k.replace("module.", "", 1): v for k, v in state_dict.items()}
-			model.load_state_dict(state_dict, strict=True)
-		else:
-			raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
+	model = BiGRU().to(device)
+
+	# Checkpoints are loaded onto the selected device so CPU evaluation also works.
+	model_path = Path(model_path)
+	if model_path.exists():
+		state_dict = torch.load(model_path, map_location=device, weights_only=False)
+		if isinstance(state_dict, dict) and any(k.startswith("module.") for k in state_dict):
+			state_dict = {k.replace("module.", "", 1): v for k, v in state_dict.items()}
+		model.load_state_dict(state_dict, strict=True)
+	else:
+		raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
+
 	return model
 
 
