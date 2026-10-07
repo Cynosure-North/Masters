@@ -118,7 +118,7 @@ def train_model(
 			epoch_loss += loss.item()
 
 		epoch_loss /= batch_count
-		message = f"Epoch {epoch} -- train loss: {epoch_loss:.6f}"
+		message = f"Epoch {epoch:<3.0f} -- train loss: {epoch_loss:.6f}"
 
 		if validation_dataloader is not None:
 			# Validation selects the best checkpoint without updating model parameters.

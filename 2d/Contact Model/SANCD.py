@@ -109,7 +109,7 @@ def train_model(
 		if batch_count == 0:
 			raise ValueError("The dataloader must contain at least one batch.")
 			
-		message = f"Epoch {epoch} -- {phase} loss: {epoch_loss / batch_count:.6f}"
+		message = f"Epoch {epoch:<3.0f} -- {phase} loss: {epoch_loss / batch_count:.6f}"
 		print(message)
 		return epoch_loss / batch_count
 
@@ -207,8 +207,7 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _bigru_path=N
 		"batch_size": 64,
 		"collate_fn": pad_variable,
 		"num_workers": 2,
-		"pin_memory": True,
-	}
+		"pin_memory": True }
 	train_dataloader = DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)
 	validation_dataloader = DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)
 	print("data loaded")

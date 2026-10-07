@@ -124,7 +124,7 @@ def train_model(
 			if losses }
 
 		if validation_dataloader is None:
-			print(f"Epoch {epoch + 1} -- train loss: {train_loss}")
+			print(f"Epoch {epoch + 1:<3.0f} -- train loss: {train_loss}")
 			continue
 		validation_loss, validation_accuracy = test_model(model, validation_dataloader)
 		if validation_loss < best_loss:

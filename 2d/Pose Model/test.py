@@ -160,7 +160,14 @@ def main():
 	project_dir = Path(__file__).resolve().parent
 	save_path = project_dir / "trained" / "test_MLP_weights.pth"
 
-	MLP.main(train_path, val_path, test_path, save_path)
+	if True:
+		MLP.main(train_path, val_path, test_path, save_path)
+	else:
+		print("MLP")
+		loss, accuracy = test_model(MLP.instantiate_models(save_path), test_dataloader)
+		print(f"Test Loss: {loss}")
+		print(f"Test Accuracy: {accuracy:.4%}")
+		
 
 if __name__ == "__main__":
 	main()
