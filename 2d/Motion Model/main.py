@@ -64,15 +64,9 @@
 # 4.76M parameters. This language model was trained on using a window of 500 characters on text
 # sampled from 2 million articles in the CC-News dataset.
 
-import torch
-from torch.utils.data import DataLoader
-import editdistance # pyright: ignore[reportMissingModuleSource]
-from pathlib import Path
-
 import LLM
 import TCN
 from BeamSearch import incremental_prefix_beam_search
-from data import MotionDataset
 
 def interactive(tnn, llm):
 	pass
@@ -81,40 +75,6 @@ def interactive(tnn, llm):
 	# If a new keypress has come in from the TNN update the next char
 	# Else use the off-frames to run the llm in batches (of 4?) to manage performance
 
-@torch.no_grad()
-def test():
-	project_dir = Path(__file__).resolve().parent
-	tcn_path = project_dir / "trained" / "tnn.pth"
-	llm_path = project_dir / "downloaded" / "gemma-4-e2b-q4_k_m.gguf"
-	test_path = project_dir / "data" / "train.csv"
-
-	dataset = MotionDataset(test_path)
-	loader = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=2, pin_memory=True)
-	tcn = TCN.instantiate_model(tcn_path).eval()
-	llm = LLM.LLM(llm_path).get_word_probability
-
-	total_length
-	err_distance = 0
-	correct_count = 0
-
-	for data, label in loader:
-		tnn_prediction = tcn(data)
-		prediction = incremental_prefix_beam_search(tnn_prediction, llm)
-
-		levenshtein = editdistance.eval(prediction, label)
-		total_length += len(label)
-		if prediction == label:
-			correct_count += 1
-		# print(f"CORRECT - {prediction}")
-		else:
-			err_distance += levenshtein
-			# print(f"{levenshtein} - prediction: {prediction}, correct answer {label}")
-
-	word_accuracy = correct_count / len(dataset)
-	distance_accuracy = err_distance / total_length
-	print(f"Test accuracy (Correct phrases) {word_accuracy:.2%}")
-	print(f"Test accuracy (Levenshtien distance) {distance_accuracy:.2%}")
-
 
 if __name__ == "__main__":
-	test()
+	interactive()

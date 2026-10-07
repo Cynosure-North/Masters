@@ -2,35 +2,38 @@ import torch
 import numpy as np
 from llama_cpp import Llama, LogitsProcessorList
 import re
+import weakref
 
 class LLM:
 	def __init__(self, path):
 		# Load or pre-calculate non-ASCII token IDs to keep inference fast
-		cache_path = path.withname(path.stem + "-non_ascii_token_ids.npy")
+		cache_path = path.with_name(path.stem + "-non_ascii_token_ids.npy")
 
 		if cache_path.exists():
 			non_ascii_token_ids = np.load(cache_path)
 			print(f"Loaded cached non-ASCII tokens from {cache_path} ({len(non_ascii_token_ids)} ids)")
 		else:
 			model = Llama(model_path=str(path), verbose=False)
+			try:
+				non_ascii_token_ids = []
+				num_tokens = model.n_vocab()
 
-			non_ascii_token_ids = []
-			num_tokens = model.n_vocab()
+				allowed = re.compile("^[A-Za-z_:;.,' -]*$")
+				for token_id in range(num_tokens):
+					try:
+						# Convert token ID to string byte representation
+						token_bytes = model.detokenize([token_id])
+						token_str = token_bytes.decode("utf-8")
+						
+						# Check if the string contains non-ASCII characters
+						if not allowed.search(token_str):
+							non_ascii_token_ids.append(token_id)
 
-			allowed = re.compile("^[A-Za-z_:;.,' -]*$")
-			for token_id in range(num_tokens):
-				try:
-					# Convert token ID to string byte representation
-					token_bytes = model.detokenize([token_id])
-					token_str = token_bytes.decode("utf-8")
-					
-					# Check if the string contains non-ASCII characters
-					if not allowed.search(token_str):
+					except UnicodeDecodeError:
+						# Ban partial/invalid byte tokens that form multi-byte UTF-8 chars
 						non_ascii_token_ids.append(token_id)
-
-				except UnicodeDecodeError:
-					# Ban partial/invalid byte tokens that form multi-byte UTF-8 chars
-					non_ascii_token_ids.append(token_id)
+			finally:
+				model.close()
 
 			# Convert to a NumPy array for fast indexing
 			non_ascii_token_ids = np.array(non_ascii_token_ids)
@@ -45,6 +48,7 @@ class LLM:
 		processors = LogitsProcessorList([ascii_only_processor])
 		
 		self.model = Llama(model_path=str(path), verbose=False, processors=processors, logits_all=True)
+		self._model_finalizer = weakref.finalize(self, self.model.close)
 
 	def get_word_probability(self, text):
 		prefix, word = text.rsplit(" ", 1)
@@ -53,8 +57,12 @@ class LLM:
 		self.model.eval(prefix)
 
 		raw_logits = self.model.scores[-1]
-		probailities = torch.nn.functional.softmax(raw_logits)
-		return probailities[word_id]
+		probabilities = torch.nn.functional.softmax(raw_logits)
+		return probabilities.tolist()[word_id]
+
+	def close(self):
+		if self._model_finalizer.alive:
+			self._model_finalizer()
 
 
 

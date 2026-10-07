@@ -2,7 +2,7 @@
 # https://zhaozeyu1995.github.io/CTC-Prefix-Beam-Search-Decoding-Algorithm-with-Language-Model/
 # https://medium.com/corti-ai/ctc-networks-and-language-models-prefix-beam-search-explained-c11d1ee23306
 
-from collections import Counter, deque
+from collections import defaultdict, deque
 import editdistance # pyright: ignore[reportMissingModuleSource]
 import re
 from data import chars
@@ -13,21 +13,21 @@ num_features = len(chars) + 1	# Also the non-character (when no key is pressed)
 convergence_delay=6
 
 # Init
-prev_Pb, prev_Pnb = Counter(), Counter()
+prev_Pb, prev_Pnb = defaultdict(float), defaultdict(float)
 prev_Pb[''] = 1		# Probability of blank character
 prev_Pnb[''] = 0		# Probability of non-blank character
-previous_prefixes = deque(maxlen=convergence_delay)
-previous_prefixes.append([''])
+previous_prefixes = None
 
 
 def incremental_prefix_beam_search(
 	ctc,
-	lm=None,
+	lm,
 	*,
 	k=100,
 	alpha=0.30,
 	beta=5,		# TODO: Tune llm compensation factor
 	prune=0.001,
+	convergence_delay=6
 ):
 	"""
 	Args:
@@ -43,14 +43,18 @@ def incremental_prefix_beam_search(
 	"""
 	global prev_Pb, prev_Pnb, previous_prefixes
 
-	pruned_alphabet = [alphabet[i] for i in ctc if i > prune]
-	Pb, Pnb = Counter(), Counter()
+	if previous_prefixes is None:
+		previous_prefixes = deque(maxlen=(convergence_delay if convergence_delay != 0 else None))
+		previous_prefixes.append([''])
+
+	pruned_alphabet = [alphabet[idx] for idx, val in enumerate(ctc) if val > prune]
+	Pb, Pnb = defaultdict(float), defaultdict(float)
 	blank_prob = ctc[-1]
 
 	for prefix in previous_prefixes[-1]:
 		
 		# Once you hit the end character stick with that
-		if prefix[-1] == '>' and len(prefix) > 0:
+		if len(prefix) > 0 and prefix[-1] == '>':
 			Pb[prefix] = prev_Pb[prefix]
 			Pnb[prefix] = prev_Pnb[prefix]
 			continue  
@@ -65,12 +69,12 @@ def incremental_prefix_beam_search(
 			
 			else:
 				# Extending with the previous character
-				if c == prefix[-1] and len(prefix) > 0:
+				if len(prefix) > 0 and c == prefix[-1]:
 					Pnb[extended] += char_prob * prev_Pb[prefix]
 					Pnb[prefix] += char_prob * prev_Pnb[prefix]
 
 				# Extending with space/end character - triggers LM likelihood check
-				elif c in (' ', '>') and len(prefix.replace(' ', '')) > 0:
+				elif len(prefix.replace(' ', '')) > 0 and c in (' ', '>'):
 					# With a convergence_delay of only a handful of frames I'm unsure how much
 					# this can really do
 					lm_prob = lm(extended.strip(' >')) ** alpha
@@ -85,12 +89,17 @@ def incremental_prefix_beam_search(
 					Pnb[extended] += char_prob * prev_Pnb[extended]
 
 
-	current_prefixes = Pb + Pnb
+	current_prefixes = {key: val1 + val2 for ((key, val1), (_, val2)) in zip(Pb.items(), Pnb.items())}
 	word_count = lambda l: re.findall(r'\w+[\s>]', l)
 	scorer = lambda l: current_prefixes[l] * (len(word_count(l)) + 1) ** beta
 		
+	if convergence_delay == 0:
+		prev_Pb, prev_Pnb = Pb, Pnb
+		return sorted(current_prefixes, key=scorer, reverse=True)[0].strip('>')
+
 	# Force convergence
 	if len(previous_prefixes < convergence_delay):
+		prev_Pb, prev_Pnb = Pb, Pnb
 		# Select most probable prefixes
 		current_prefixes = sorted(current_prefixes, key=scorer, reverse=True)
 		previous_prefixes.append(current_prefixes[:k])
@@ -122,4 +131,23 @@ def incremental_prefix_beam_search(
 
 	return previous_prefixes[0][0].strip('>')
 
+def reset_incremental_prefix_beam_search():
+	global prev_prefixes
+	prev_prefixes = None
 	
+def prefix_beam_search(
+	ctc,
+	lm,
+	*,
+	k=100,
+	alpha=0.30,
+	beta=5,
+	prune=0.001):
+
+	final_output = ""
+	for frame in ctc:
+		final_output = incremental_prefix_beam_search(frame, lm, k=k, alpha=alpha, beta=beta, prune=prune, convergence_delay=0)
+
+	reset_incremental_prefix_beam_search()
+
+	return final_output

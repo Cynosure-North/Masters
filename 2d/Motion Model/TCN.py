@@ -138,7 +138,7 @@ def train_model(
 			batch_count += 1
 
 		epoch_loss /= max(batch_count, 1)
-		message = f"Epoch {epoch} -- train loss: {epoch_loss:.6f}"
+		message = f"Epoch {epoch:<3.0f} -- train loss: {epoch_loss:.6f}"
 
 		if validation_dataloader is not None:
 			validation_loss, _ = test_model(model, validation_dataloader)
@@ -152,7 +152,7 @@ def train_model(
 			else:
 				stale_epochs += 1
 				message += f", patience: {stale_epochs}/{patience}"
-				if stale_epochs >= patience:
+				if stale_epochs >= patience and patience != -1:
 					print(message)
 					print("Early stopping")
 					break
