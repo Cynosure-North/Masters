@@ -12,9 +12,6 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from data import chars, transform, MotionDataset
-from BeamSearch import prefix_beam_search
-import TCN
-import LLM
 
 SEED = 0
 dir_path = Path(r"C:\Users\mno64\Datasets\How we type\Motion Capture")
@@ -141,6 +138,9 @@ def random_split(path):
 	return train_path, val_path, test_path
 
 def main():
+	from BeamSearch import prefix_beam_search
+	import TCN
+	import LLM
 	print()
 
 	train_path, val_path, test_path = random_split(dir_path)
@@ -148,57 +148,59 @@ def main():
 	llm_path = project_dir / "downloaded" / "gemma-4-e2b-q4_k_m.gguf"
 	save_path = project_dir / "trained" / "test_TCN_weights.pth"
 
-	if False or not save_path.exists():
+	if True or not save_path.exists():
 		print("######### Training and testing TCN")
 		TCN.main(train_path, val_path, test_path, save_path)
-	
-	llm = LLM.LLM(llm_path)
-	print("######### Testing TCN with CTC prefix beam search")
-	tcn = TCN.instantiate_model(save_path).eval()
-	device = next(tcn.parameters()).device
-	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
-	loader = DataLoader(
-		MotionDataset(test_path),
-		shuffle=False,
-		collate_fn=TCN.collate_batch,
-		**loader_kwargs,
-	)
+	else:
+		print("######### Testing TCN")
+		tcn = TCN.instantiate_model(save_path).eval()
+		device = next(tcn.parameters()).device
+		loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
+		loader = DataLoader(
+			MotionDataset(test_path),
+			shuffle=False,
+			collate_fn=TCN.collate_batch,
+			**loader_kwargs)
+		TCN.test_model(tcn, loader)
 
-	incorrect_chars = 0
-	total_chars = 0
-	incorrect_sequences = 0
-	total_sequences = 0
+		llm = LLM.LLM(llm_path)
+		print("######### Testing TCN with CTC prefix beam search")
 
-	with torch.inference_mode():
-		for features, labels, input_lengths, target_lengths in loader:
-			features = features.to(device, non_blocking=True)
-			logits = tcn(features)
+		incorrect_chars = 0
+		total_chars = 0
+		incorrect_sequences = 0
+		total_sequences = 0
 
-			for sample_logits, label, target_length in zip(
-				logits, labels, target_lengths,):
+		with torch.inference_mode():
+			for features, labels, _, target_lengths in loader:
+				features = features.to(device, non_blocking=True)
+				logits = tcn(features)
 
-				sample_logits = sample_logits.cpu().tolist()
-				predicted_text = prefix_beam_search(
-					sample_logits,
-					llm.get_word_probability)
-				expected_text = "".join(chars[token - 1] for token in label.tolist())
+				for sample_logits, label, target_length in zip(
+					logits, labels, target_lengths,):
 
-				incorrect_chars += editdistance.eval(expected_text, predicted_text)
-				total_chars += int(target_length)
-				incorrect_sequences += int(expected_text != predicted_text)
-				total_sequences += 1
+					sample_logits = sample_logits.cpu().tolist()
+					predicted_text = prefix_beam_search(
+						sample_logits,
+						llm.get_word_probability)
+					expected_text = "".join(chars[token - 1] for token in label.tolist())
 
-	character_accuracy = max(0.0, 1.0 - incorrect_chars / total_chars)
-	word_accuracy = (max(0.0, 1.0 - incorrect_sequences / total_sequences))
+					incorrect_chars += editdistance.eval(expected_text, predicted_text)
+					total_chars += int(target_length)
+					incorrect_sequences += int(expected_text != predicted_text)
+					total_sequences += 1
 
-	print(
-		f"Character accuracy: {character_accuracy:.2%} "
-		f"({incorrect_chars} edit(s) / {total_chars} reference characters)"
-	)
-	print(
-		f"Sequence: {word_accuracy:.2%} "
-		f"({incorrect_sequences} incorrect sequence(s) / {total_sequences} reference sequences)"
-	)
+		character_accuracy = max(0.0, 1.0 - incorrect_chars / total_chars)
+		word_accuracy = (max(0.0, 1.0 - incorrect_sequences / total_sequences))
+
+		print(
+			f"Character accuracy: {character_accuracy:.2%} "
+			f"({incorrect_chars} edit(s) / {total_chars} reference characters)"
+		)
+		print(
+			f"Sequence: {word_accuracy:.2%} "
+			f"({incorrect_sequences} incorrect sequence(s) / {total_sequences} reference sequences)"
+		)
 
 if __name__ == "__main__":
 	main()

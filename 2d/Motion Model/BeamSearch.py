@@ -3,9 +3,11 @@
 # https://medium.com/corti-ai/ctc-networks-and-language-models-prefix-beam-search-explained-c11d1ee23306
 
 from collections import defaultdict, deque
-import editdistance # pyright: ignore[reportMissingModuleSource]
+import editdistance
 import re
-from data import chars
+from pathlib import Path
+from torch.utils.data import DataLoader
+from data import chars, MotionDataset
 
 
 alphabet = chars + ['-', '>']	# Blank character and end character
@@ -134,33 +136,6 @@ def incremental_prefix_beam_search(
 def reset_incremental_prefix_beam_search():
 	global prev_prefixes
 	prev_prefixes = None
-	
-def tune_alpha_beta(
-	ctc_sequences,
-	lm,
-	texts,
-	*,
-	alpha_values=(0.1, 0.2, 0.3, 0.5, 0.7),
-	beta_values=(1, 3, 5, 8, 12),
-	k=100,
-	prune=0.001,
-):
-	"""Grid-search alpha/beta pairs on a set of target strings and return the best pair."""
-	if len(ctc_sequences) != len(texts):
-		raise ValueError("ctc_sequences and texts must have the same length.")
-	best_result = None
-	for alpha in alpha_values:
-		for beta in beta_values:
-			matches = 0
-			for ctc, expected in zip(ctc_sequences, texts):
-				predicted = prefix_beam_search(ctc, lm, k=k, alpha=alpha, beta=beta, prune=prune)
-				matches += int(predicted == expected)
-			score = matches / max(len(texts), 1)
-			candidate = (score, alpha, beta)
-			if best_result is None or candidate[0] > best_result[0]:
-				best_result = candidate
-	return {"alpha": best_result[1], "beta": best_result[2], "score": best_result[0]} if best_result else {"alpha": 0.3, "beta": 5, "score": 0.0}
-
 
 def prefix_beam_search(
 	ctc,
@@ -178,3 +153,74 @@ def prefix_beam_search(
 	reset_incremental_prefix_beam_search()
 
 	return final_output
+	
+def tune_alpha_beta(
+	ctc_sequences,
+	lm,
+	texts,
+	*,
+	alpha_values=(0, 0.001, 0.005, 0.1, 0.2, 0.3, 0.5, 0.7),
+	beta_values=(0, 0.5, 1, 1.5, 3, 5, 8, 12),
+):
+	"""Grid-search alpha/beta pairs on a set of target strings and return the best pair."""
+	if len(ctc_sequences) != len(texts):
+		raise ValueError("ctc_sequences and texts must have the same length.")
+	best_result = (-float('inf'), -1, -1)
+	for alpha in alpha_values:
+		for beta in beta_values:
+			matches = 0
+			for ctc, expected in zip(ctc_sequences, texts):
+				predicted = prefix_beam_search(ctc, lm, alpha=alpha, beta=beta)
+				matches += int(predicted == expected)
+			score = matches / max(len(texts), 1)
+			candidate = (score, alpha, beta)
+			print(f"a: {alpha:<5.f}, b:{beta:<3.f} - {score:.3f}")
+			if best_result is None or candidate[0] > best_result[0]:
+				best_result = candidate
+	return (best_result[1], best_result[2], best_result[0])
+
+def run_tuning():
+	from test import random_split, dir_path
+	import LLM
+	import TCN
+
+	train_path, _, _ = random_split(dir_path)
+	project_dir = Path(__file__).resolve().parent
+	llm_path = project_dir / "downloaded" / "gemma-4-e2b-q4_k_m.gguf"
+	tcn_path = project_dir / "trained" / "test_TCN_weights.pth"
+
+	llm = LLM.LLM(llm_path)
+	tcn = TCN.instantiate_model(tcn_path).eval()
+	device = next(tcn.parameters()).device
+	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
+	loader = DataLoader(
+		MotionDataset(train_path),
+		collate_fn=TCN.collate_batch,
+		**loader_kwargs)
+
+	ctc_outputs = []
+	ctc_labels = []
+	for features, labels, _, _ in loader:
+		logits = tcn(features.to(device, non_blocking=True))
+
+		for sample_logits, label in zip(logits, labels):
+			sample_logits = sample_logits.cpu().tolist()
+
+			ctc_outputs.append(sample_logits)
+			ctc_labels.append(label)
+
+	print("Loaded data, running sweep")
+
+	alpha, beta, score = tune_alpha_beta(
+		ctc_outputs,
+		llm.get_word_probability,
+		ctc_labels)
+
+	print(f"Best alpha: {alpha}")
+	print(f"Best beta: {beta}")
+	print(f"Best result (correct sequences/total sequences): {score:.2%}")
+
+if __name__ == "__main__":
+	run_tuning()
+
+# TODO: 
