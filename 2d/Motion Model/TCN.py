@@ -138,7 +138,7 @@ def train_model(
 			batch_count += 1
 
 		epoch_loss /= max(batch_count, 1)
-		message = f"Epoch {epoch:<3.0f} -- train loss: {epoch_loss:.6f}"
+		message = f"Epoch {epoch:<3n} -- train loss: {epoch_loss:.6f}"
 
 		if validation_dataloader is not None:
 			validation_loss, _ = test_model(model, validation_dataloader)
@@ -241,7 +241,7 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	torch.save(trained_model.state_dict(), save_path)
 
 	loss, accuracy = test_model(trained_model, test_dataloader)
-	print(f"Test Loss: {loss}")
+	print(f"Test Loss: {loss:.4f}")
 	print(f"Test Accuracy: {accuracy:.4%}")
 
 

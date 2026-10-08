@@ -136,13 +136,15 @@ def random_split(path):
 
 		print("Processing complete")
 	else:
-		print("Loaded existing split directories")
+		print("Loaded existing split processed data directories")
 
 	return train_path, val_path, test_path
 
 def main():
-	project_dir = Path(__file__).resolve().parent
+	print()
+
 	train_path, val_path, test_path = random_split(dir_path)
+	project_dir = Path(__file__).resolve().parent
 	llm_path = project_dir / "downloaded" / "gemma-4-e2b-q4_k_m.gguf"
 	save_path = project_dir / "trained" / "test_TCN_weights.pth"
 
@@ -150,9 +152,9 @@ def main():
 		print("######### Training and testing TCN")
 		TCN.main(train_path, val_path, test_path, save_path)
 	
+	llm = LLM.LLM(llm_path)
 	print("######### Testing TCN with CTC prefix beam search")
 	tcn = TCN.instantiate_model(save_path).eval()
-	llm = LLM.LLM(llm_path)
 	loader = DataLoader(MotionDataset(test_path), shuffle=False)
 
 	incorrect_chars = 0
@@ -181,7 +183,7 @@ def main():
 	)
 	print(
 		f"Sequence: {word_accuracy:.2%} "
-		f"({incorrect_sequences} edit(s) / {total_sequences} reference sequences)"
+		f"({incorrect_sequences} incorrect sequence(s) / {total_sequences} reference sequences)"
 	)
 
 if __name__ == "__main__":

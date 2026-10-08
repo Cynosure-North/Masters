@@ -98,7 +98,7 @@ def incremental_prefix_beam_search(
 		return sorted(current_prefixes, key=scorer, reverse=True)[0].strip('>')
 
 	# Force convergence
-	if len(previous_prefixes < convergence_delay):
+	if len(previous_prefixes) < convergence_delay:
 		prev_Pb, prev_Pnb = Pb, Pnb
 		# Select most probable prefixes
 		current_prefixes = sorted(current_prefixes, key=scorer, reverse=True)
@@ -117,7 +117,7 @@ def incremental_prefix_beam_search(
 	converged_prefix = sorted(relevance, key=relevance.get, reverse=True)[0]
 
 	# Drop dead paths
-	prev_Pb, prev_Pnb = Counter(), Counter()
+	prev_Pb, prev_Pnb = defaultdict(float), defaultdict(float)
 	for k, v in Pb.items():
 		if k.startswith(converged_prefix):
 			prev_Pb[k] = v

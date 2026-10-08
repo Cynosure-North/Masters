@@ -12,10 +12,15 @@ class SANCD(nn.Module):
 	def __init__(self, bigru_path, bert_path):
 		super().__init__()
 
-		self.bigru = BiGRU.instantiate_model(bigru_path)
-		self.bert = BERT.instantiate_model(bert_path)
-
-		self.threshold = 0.45
+		if bigru_path.exists():
+			self.bigru = BiGRU.instantiate_model(bigru_path)
+		else:
+			raise FileNotFoundError(f"BiGRU path not found: {bigru_path}")
+				
+		if bert_path.exists():
+			self.bert = BERT.instantiate_model(bert_path)
+		else:
+			raise FileNotFoundError(f"BERT path not found: {bert_path}")
 
 	def forward(self, data):
 		_, output = self.forward_components(data)
@@ -29,7 +34,7 @@ class SANCD(nn.Module):
 
 		# Low-confidence predictions are replaced with the mask-token, which BERT fills in
 		filtered_input = torch.where(
-			top1_value > self.threshold,
+			top1_value > 0.45,
 			top1_predicted,
 			torch.full_like(top1_predicted, BERT.CharTokenizer().mask_token_id),
 		)
@@ -37,6 +42,24 @@ class SANCD(nn.Module):
 		output = self.bert(filtered_input)
 
 		return output_logits, output
+
+
+def instantiate_model(model_path, bigru_path, bert_path):
+	"""Create a SANCD model and load weights from a saved checkpoint path."""
+
+	model_path, bigru_path, bert_path = Path(model_path), Path(bigru_path), Path(bert_path)
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+	model = SANCD(bigru_path, bert_path).to(device)
+
+	if model_path.exists():
+		state_dict = torch.load(model_path, map_location=device, weights_only=False)
+		if isinstance(state_dict, dict) and any(key.startswith("module.") for key in state_dict):
+			state_dict = {key.replace("module.", "", 1): value for key, value in state_dict.items()}
+		model.load_state_dict(state_dict, strict=True)
+	else:
+		raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
+
+	return model
 
 
 
@@ -109,7 +132,7 @@ def train_model(
 		if batch_count == 0:
 			raise ValueError("The dataloader must contain at least one batch.")
 			
-		message = f"Epoch {epoch:<3.0f} -- {phase} loss: {epoch_loss / batch_count:.6f}"
+		message = f"Epoch {epoch:<3n} -- {phase} loss: {epoch_loss / batch_count:.6f}"
 		print(message)
 		return epoch_loss / batch_count
 
@@ -215,9 +238,9 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _bigru_path=N
 	trained_model = train_model(
 		model,
 		train_dataloader,
-		bert_epochs=3,
-		bigru_epochs=3,
-		alternating_epochs=3,
+		bert_epochs=4,
+		bigru_epochs=4,
+		alternating_epochs=6,
 		gradient_clip=0.5,
 		use_amp=True,
 		checkpoint_path=save_path,

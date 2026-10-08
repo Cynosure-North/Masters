@@ -11,9 +11,9 @@ class LLM:
 
 		if cache_path.exists():
 			non_ascii_token_ids = np.load(cache_path)
-			print(f"Loaded cached non-ASCII tokens from {cache_path} ({len(non_ascii_token_ids)} ids)")
+			print(f"Loaded cached non-ASCII tokens")
 		else:
-			model = Llama(model_path=str(path), verbose=False)
+			model = Llama(model_path=str(path), verbose=False, flash_attn=True)
 			try:
 				non_ascii_token_ids = []
 				num_tokens = model.n_vocab()
@@ -47,7 +47,13 @@ class LLM:
 
 		processors = LogitsProcessorList([ascii_only_processor])
 		
-		self.model = Llama(model_path=str(path), verbose=False, processors=processors, logits_all=True)
+		self.model = Llama(
+			model_path=str(path),
+			verbose=False,
+			processors=processors,
+			logits_all=True,
+			swa_full=False,
+			flash_attn=True)
 		self._model_finalizer = weakref.finalize(self, self.model.close)
 
 	def get_word_probability(self, text):

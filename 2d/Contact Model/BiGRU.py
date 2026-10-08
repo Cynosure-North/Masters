@@ -118,15 +118,13 @@ def train_model(
 			epoch_loss += loss.item()
 
 		epoch_loss /= batch_count
-		message = f"Epoch {epoch:<3.0f} -- train loss: {epoch_loss:.6f}"
+		message = f"Epoch {epoch:<3n} -- train loss: {epoch_loss:.6f}"
 
 		if validation_dataloader is not None:
 			# Validation selects the best checkpoint without updating model parameters.
 			validation_loss, _ = test_model(
 				model,
 				validation_dataloader,
-				device=device,
-				loss_fn=loss_fn,
 				use_amp=use_amp,
 			)
 			model.train()
@@ -236,7 +234,7 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	torch.save(trained_model.state_dict(), save_path)
 
 	loss, accuracy = test_model(trained_model, test_dataloader)
-	print(f"Test Loss: {loss}")
+	print(f"Test Loss: {loss:.4f}")
 	print(f"Test Accuracy: {accuracy:.4%}")
 
 if __name__ == "__main__":

@@ -74,14 +74,18 @@ def random_split(path):
 				writer = csv.writer(f)
 				writer.writerow(["sentence", "x_list", "y_list"])
 				writer.writerows(split_rows)
+	else:
+		print("Loaded existing processed data files")
 
 	return train_path, val_path, test_path
 
 def main():
-	train_path, val_path, test_path = random_split(csv_path)
+	print()
 
+	train_path, val_path, test_path = random_split(csv_path)
 	project_dir = Path(__file__).resolve().parent
 	bigru_path = project_dir / "trained" / "test_BiGRU_weights.pth"
+	bert_path = project_dir / "trained" / "best_BERT.pth"
 	sacnd_path = project_dir / "trained" / "test_SACND_weights.pth"
 
 	if False or not (bigru_path.exists() and sacnd_path.exists()):
@@ -103,13 +107,13 @@ def main():
 
 		print("######### Testing BiGRU")
 		bigru_loss, bigru_accuracy = BiGRU.test_model(BiGRU.instantiate_model(bigru_path), test_dataloader)
-		print(f"Test Loss: {bigru_loss}")
+		print(f"Test Loss: {bigru_loss:.4f}")
 		print(f"Test Accuracy: {bigru_accuracy:.4%}")
 
 		print("######### Testing SANCD")
-		sacnd_metrics = SANCD.test_model(SANCD.instantiate_model(sacnd_path), test_dataloader)
+		sacnd_metrics = SANCD.test_model(SANCD.instantiate_model(sacnd_path, bigru_path, bert_path), test_dataloader)
 		for component, (loss, accuracy) in sacnd_metrics.items():
-			print(f"{component.title()} Test Loss: {loss:.6f}")
+			print(f"{component.title()} Test Loss: {loss:.4f}")
 			print(f"{component.title()} Test Accuracy: {accuracy:.4%}")
 
 

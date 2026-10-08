@@ -88,7 +88,7 @@ def create_mlm_inputs(input_ids, tokenizer, mask_prob=0.15):
 	return labels, masked_inputs
 
 class CharBERTForMLM(nn.Module):
-	def __init__(self, vocab_size, d_model=256, nhead=8, num_layers=6, max_len=512, dropout=0.1):
+	def __init__(self, vocab_size=len(CharTokenizer()), d_model=256, nhead=8, num_layers=6, max_len=512, dropout=0.1):
 		super().__init__()
 		self.d_model = d_model
 	   
@@ -147,8 +147,8 @@ def instantiate_model(model_path):
 	model_path = Path(model_path)
 	if model_path.exists():
 		state_dict = torch.load(model_path, map_location=device, weights_only=False)
-		if isinstance(state_dict, dict) and any(k.startswith("module.") for k in state_dict):
-			state_dict = {k.replace("module.", "", 1): v for k, v in state_dict.items()}
+		if isinstance(state_dict, dict) and any(key.startswith("module.") for key in state_dict):
+			state_dict = {key.replace("module.", "", 1): value for key, value in state_dict.items()}
 		model.load_state_dict(state_dict, strict=True)
 	else:
 		raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
@@ -228,8 +228,6 @@ def _mlm_loss(logits, labels, loss_fn):
 def checkpoint_path_for(save_path, epoch, batch_count, *, checkpoint_interval=50_000):
 	"""Return a path in the same directory as save_path with a checkpoint-specific basename."""
 	save_path = Path(save_path)
-	checkpoint_step = batch_count / checkpoint_interval
-	return save_path.with_name(f"{save_path.stem}_{epoch}_{checkpoint_step}{save_path.suffix}")
 
 def train_model(
 	model,
@@ -294,21 +292,17 @@ def train_model(
 
 			batch_loss = loss.detach().item()
 
-			if batch_count % 500 == 0: print(f"batch {batch_count} of epoch {epoch} finished -- loss: {batch_loss}")
+			if batch_count % 500 == 0: print(f"batch {batch_count:<6n} of epoch {epoch:<3n} finished -- loss: {batch_loss:.4f}")
 			if save_path is not None and batch_count % checkpoint_interval == 0:
-				checkpoint = checkpoint_path_for(save_path, epoch, batch_count, checkpoint_interval=checkpoint_interval)
+				checkpoint = save_path.with_name(f"BERT_{epoch}_{batch_count//checkpoint_interval}.pth")
 				torch.save(model.state_dict(), checkpoint)
-				print(f"Saved checkpoint, epoch: {epoch} batch {batch_count / checkpoint_interval}")
+				print(f"Saved checkpoint, epoch: {epoch} batch {batch_count // checkpoint_interval}")
 
 				# Keep the most recent checkpoint in the current save directory while
 				# preserving the configured basename pattern for the active run.
-				previous_checkpoint = checkpoint_path_for(
-					save_path,
-					epoch,
-					max(batch_count - checkpoint_interval, 0),
-					checkpoint_interval=checkpoint_interval,
-				)
-				previous_checkpoint.unlink(missing_ok=True)
+				save_path.with_name(
+					f"BERT_{epoch}_{max(batch_count-checkpoint_interval, 0)//checkpoint_interval}.pth") \
+				.unlink(missing_ok=True)
 
 
 		if batch_count == 0:
@@ -383,7 +377,7 @@ def main():
 	save_path = project_dir / "trained" / "best_BERT.pth"
 
 	tokenizer = CharTokenizer()
-	model = CharBERTForMLM(vocab_size=len(tokenizer), d_model=128, nhead=4, num_layers=3)
+	model = CharBERTForMLM()
 
 	if save_path.exists():
 		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))
@@ -418,7 +412,7 @@ def main():
 	)
 
 	loss, accuracy = test_model(trained_model, test_dataloader, tokenizer)
-	print(f"Test Loss: {loss}")
+	print(f"Test Loss: {loss:.4f}")
 	print(f"Test Accuracy: {accuracy:.4%}")
 
 if __name__ == "__main__":

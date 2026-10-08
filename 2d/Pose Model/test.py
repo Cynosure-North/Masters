@@ -151,13 +151,14 @@ def random_split(path):
 
 		print("Processing complete")
 	else:
-		print("Loaded existing files")
+		print("Loaded existing processed data files")
 
 	return train_path, val_path, test_path
 
 def main():
-	train_path, val_path, test_path = random_split(dir_path)
+	print()
 
+	train_path, val_path, test_path = random_split(dir_path)
 	project_dir = Path(__file__).resolve().parent
 	save_path = project_dir / "trained" / "test_MLP_weights.pth"
 
@@ -170,7 +171,7 @@ def main():
 
 		print("######### Testing MLP")
 		loss, accuracy = MLP.test_model(MLP.instantiate_models(save_path), test_dataloader)
-		print(f"Test Loss: {loss}")
+		print(f"Test Loss: {loss:.4f}")
 		print(f"Test Accuracy: {accuracy:.4%}")
 		
 

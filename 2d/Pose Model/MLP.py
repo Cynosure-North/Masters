@@ -124,7 +124,7 @@ def train_model(
 			if losses }
 
 		if validation_dataloader is None:
-			print(f"Epoch {epoch + 1:<3.0f} -- train loss: {train_loss}")
+			print(f"Epoch {epoch + 1:3n} -- train loss: {train_loss:.4f}")
 			continue
 		validation_loss, validation_accuracy = test_model(model, validation_dataloader)
 		if validation_loss < best_loss:
@@ -135,7 +135,7 @@ def train_model(
 				torch.save(best_state, checkpoint_path)
 		else:
 			stale_epochs += 1
-		print(f"Epoch {epoch + 1:<3.0f} -- train loss: {train_loss}, validation loss: {validation_loss:.4f}, validation accuracy: {validation_accuracy:.4%}")
+		print(f"Epoch {epoch + 1:<3n} -- train loss: {train_loss:.4f}, validation loss: {validation_loss:.4f}, validation accuracy: {validation_accuracy:.4%}")
 		if stale_epochs >= patience:
 			break
 
@@ -210,7 +210,7 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	torch.save(trained_model.state_dict(), save_path)
 
 	loss, accuracy = test_model(trained_model, test_dataloader)
-	print(f"Test Loss: {loss}")
+	print(f"Test Loss: {loss:.4f}")
 	print(f"Test Accuracy: {accuracy:.4%}")
 
 if __name__ == "__main__":
