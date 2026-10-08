@@ -6,7 +6,8 @@
 import csv
 from pathlib import Path
 import numpy as np
-from data import chars, transform, calculate_params, MotionDataset
+from data import chars, transform, calculate_params, PoseDataset
+from torch.utils.data import DataLoader
 import MLP
 
 SEED = 0
@@ -160,11 +161,15 @@ def main():
 	project_dir = Path(__file__).resolve().parent
 	save_path = project_dir / "trained" / "test_MLP_weights.pth"
 
-	if True:
+	if False or not save_path.exists():
+		print("######### Training and testing MLP")
 		MLP.main(train_path, val_path, test_path, save_path)
 	else:
-		print("MLP")
-		loss, accuracy = test_model(MLP.instantiate_models(save_path), test_dataloader)
+		loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
+		test_dataloader = DataLoader(PoseDataset(test_path), shuffle=False, **loader_kwargs)
+
+		print("######### Testing MLP")
+		loss, accuracy = MLP.test_model(MLP.instantiate_models(save_path), test_dataloader)
 		print(f"Test Loss: {loss}")
 		print(f"Test Accuracy: {accuracy:.4%}")
 		

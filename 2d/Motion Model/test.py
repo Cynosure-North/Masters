@@ -146,8 +146,8 @@ def main():
 	llm_path = project_dir / "downloaded" / "gemma-4-e2b-q4_k_m.gguf"
 	save_path = project_dir / "trained" / "test_TCN_weights.pth"
 
-	if True:
-		print("######### Training TCN")
+	if False or not save_path.exists():
+		print("######### Training and testing TCN")
 		TCN.main(train_path, val_path, test_path, save_path)
 	
 	print("######### Testing TCN with CTC prefix beam search")

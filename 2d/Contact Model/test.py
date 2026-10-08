@@ -5,7 +5,8 @@
 import csv
 import random
 from pathlib import Path
-import data
+from data import pad_variable, GeometricDataset
+from torch.utils.data import DataLoader
 import BiGRU
 import SANCD
 
@@ -83,29 +84,29 @@ def main():
 	bigru_path = project_dir / "trained" / "test_BiGRU_weights.pth"
 	sacnd_path = project_dir / "trained" / "test_SACND_weights.pth"
 
-	if True:
-		print("######### Training BiGRU")
+	if False or not (bigru_path.exists() and sacnd_path.exists()):
+		print("######### Training and testing BiGRU")
 		BiGRU.main(train_path, val_path, test_path, _save_path=bigru_path)
 
 		# BERT trains on separate data (even in the final implementation), and can be tested on its own
-		
-		print("######### Training SANCD")
+			
+		print("######### Training and testing SANCD")
 		SANCD.main(train_path, val_path, test_path, _bigru_path=bigru_path, _save_path=sacnd_path)
 	else:
 		loader_kwargs = {
 			"batch_size": 64,
-			"collate_fn": data.pad_variable,
+			"collate_fn": pad_variable,
 			"num_workers": 2,
 			"pin_memory": True }
 
 		test_dataloader = DataLoader(GeometricDataset(test_path), shuffle=False, **loader_kwargs)
 
-		print("BiGRU individually")
-		bigru_loss, bigru_accuracy = test_model(BiGRU.instantiate_model(bigru_path), test_dataloader)
+		print("######### Testing BiGRU")
+		bigru_loss, bigru_accuracy = BiGRU.test_model(BiGRU.instantiate_model(bigru_path), test_dataloader)
 		print(f"Test Loss: {bigru_loss}")
 		print(f"Test Accuracy: {bigru_accuracy:.4%}")
 
-		print("SANCD")
+		print("######### Testing SANCD")
 		sacnd_metrics = SANCD.test_model(SANCD.instantiate_model(sacnd_path), test_dataloader)
 		for component, (loss, accuracy) in sacnd_metrics.items():
 			print(f"{component.title()} Test Loss: {loss:.6f}")

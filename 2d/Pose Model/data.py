@@ -38,6 +38,7 @@ class PoseDataset(torch.utils.data.Dataset):
 		self.labels = []
 
 		weird_finger_assignments = 0
+		log_weird_presses = False
 
 		with self.path.open("r", newline="", encoding="utf-8-sig") as file:
 			reader = csv.DictReader(file)
@@ -70,12 +71,12 @@ class PoseDataset(torch.utils.data.Dataset):
 					self.fingers.append(finger)
 				except ValueError:
 					weird_finger_assignments += 1
-					print(f"Someone pressed {label} with {finger}")
+					if log_weird_presses: print(f"Someone pressed {label} with {finger}")
 
 		self.features = torch.tensor(self.features, dtype=torch.float32).reshape(-1, 25)
 		self.labels = torch.tensor(self.labels, dtype=torch.long)
 
-		print(f"There were {weird_finger_assignments} times someone pressed a button with an unusual finger, which is {(weird_finger_assignments/(len(self.labels) + weird_finger_assignments)):.2%} of the total dataset")
+		if log_weird_presses: print(f"There were {weird_finger_assignments} times someone pressed a button with an unusual finger, which is {(weird_finger_assignments/(len(self.labels) + weird_finger_assignments)):.2%} of the total dataset")
 
 	def __len__(self):
 		return len(self.labels)
