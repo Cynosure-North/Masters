@@ -42,11 +42,10 @@ class CharTokenizer:
 		"""Converts token IDs back to a string."""
 		return "".join([self.idx2char.get(i, "?") for i in ids])
 
-def create_mlm_inputs(input_ids, tokenizer, mask_prob=0.15):
+def create_mlm_inputs(input_ids, tokenizer, generator, mask_prob=0.15):
 	"""
 	Applies the BERT 80/10/10 masking logic across non-special character tokens.
 	"""
-	generator = torch.Generator(device=input_ids.device).manual_seed(0)
 
 	labels = input_ids.clone()
 	masked_inputs = input_ids.clone()
@@ -242,6 +241,7 @@ def train_model(
 	use_compile=False,
 	save_path=None,
 	checkpoint_interval=50_000,
+	seed=SEED,
 ):
 	"""Train a character MLM and return average loss for each epoch."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -258,6 +258,8 @@ def train_model(
 	amp_enabled = use_amp and device.type == "cuda"
 	scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 
+	mask_generator = torch.Generator(device=device).manual_seed(seed)
+
 	for epoch in range(epochs):
 		model.train()
 		batch_count = 0
@@ -267,7 +269,12 @@ def train_model(
 			input_ids, padding_mask = _prepare_batch(
 				batch, tokenizer, device, max_length=model.pos_embedding.num_embeddings
 			)
-			labels, masked_input_ids= create_mlm_inputs(input_ids, tokenizer, mask_prob)
+			labels, masked_input_ids= create_mlm_inputs(
+				input_ids,
+				tokenizer,
+				mask_generator,
+				mask_prob,
+			)
 
 			optimizer.zero_grad(set_to_none=True)
 			try:
@@ -322,7 +329,7 @@ def test_model(
 	mask_prob=0.15,
 	use_amp=True,
 	use_compile=False,
-	seed=0,
+	seed=SEED,
 ):
 	"""Evaluate a character MLM and return average loss and masked-token accuracy."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -346,8 +353,10 @@ def test_model(
 			batch, tokenizer, device, max_length=model.pos_embedding.num_embeddings
 		)
 		labels, masked_input_ids = create_mlm_inputs(
-			input_ids, tokenizer, mask_prob, generator=mask_generator
-		)
+			input_ids,
+			tokenizer,
+			mask_prob,
+			mask_generator)
 		try:
 			with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
 				logits = model(masked_input_ids, padding_mask=padding_mask)

@@ -155,7 +155,14 @@ def main():
 	llm = LLM.LLM(llm_path)
 	print("######### Testing TCN with CTC prefix beam search")
 	tcn = TCN.instantiate_model(save_path).eval()
-	loader = DataLoader(MotionDataset(test_path), shuffle=False)
+	device = next(tcn.parameters()).device
+	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
+	loader = DataLoader(
+		MotionDataset(test_path),
+		shuffle=False,
+		collate_fn=TCN.collate_batch,
+		**loader_kwargs,
+	)
 
 	incorrect_chars = 0
 	total_chars = 0
@@ -163,16 +170,23 @@ def main():
 	total_sequences = 0
 
 	with torch.inference_mode():
-		for (features, [label], len_label) in loader:
-			predicted_text = prefix_beam_search(
-				tcn(features.to(next(tcn.parameters()).device)).tolist()[0],
-				llm.get_word_probability)
-			expected_text = "".join(chars[token - 1] for token in label.tolist())
+		for features, labels, input_lengths, target_lengths in loader:
+			features = features.to(device, non_blocking=True)
+			logits = tcn(features)
 
-			incorrect_chars += editdistance.eval(expected_text, predicted_text)
-			total_chars += len_label.item()
-			incorrect_sequences += int(expected_text != predicted_text)
-			total_sequences += 1
+			for sample_logits, label, target_length in zip(
+				logits, labels, target_lengths,):
+
+				sample_logits = sample_logits.cpu().tolist()
+				predicted_text = prefix_beam_search(
+					sample_logits,
+					llm.get_word_probability)
+				expected_text = "".join(chars[token - 1] for token in label.tolist())
+
+				incorrect_chars += editdistance.eval(expected_text, predicted_text)
+				total_chars += int(target_length)
+				incorrect_sequences += int(expected_text != predicted_text)
+				total_sequences += 1
 
 	character_accuracy = max(0.0, 1.0 - incorrect_chars / total_chars)
 	word_accuracy = (max(0.0, 1.0 - incorrect_sequences / total_sequences))

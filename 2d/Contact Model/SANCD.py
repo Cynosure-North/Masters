@@ -7,10 +7,12 @@ import BiGRU
 import BERT
 from data import GeometricDataset, pad_variable
 
+SEED = 0
 
 class SANCD(nn.Module):
-	def __init__(self, bigru_path, bert_path):
+	def __init__(self, bigru_path, bert_path, confidence_threshold=0.45):
 		super().__init__()
+		self.threshold = confidence_threshold
 
 		if bigru_path.exists():
 			self.bigru = BiGRU.instantiate_model(bigru_path)
@@ -34,7 +36,7 @@ class SANCD(nn.Module):
 
 		# Low-confidence predictions are replaced with the mask-token, which BERT fills in
 		filtered_input = torch.where(
-			top1_value > 0.45,
+			top1_value > self.threshold,
 			top1_predicted,
 			torch.full_like(top1_predicted, BERT.CharTokenizer().mask_token_id),
 		)
@@ -85,11 +87,13 @@ def train_model(
 	use_amp=True,
 	checkpoint_path=None,
 	validation_dataloader=None,
+	seed=SEED,
 ):
 	"""Train BERT, then BiGRU, then alternate between both components."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
+	generator = torch.Generator(device=device).manual_seed(seed)
 	bert_optimizer = torch.optim.AdamW(model.bert.parameters(), lr=1e-4)
 	bigru_optimizer = torch.optim.Adam(model.bigru.parameters(), lr=1e-3)
 	amp_enabled = use_amp and device.type == "cuda"
@@ -102,9 +106,10 @@ def train_model(
 		optimizers = (bert_optimizer, bigru_optimizer)
 		epoch_loss = 0.0
 		batch_count = 0
-
+ 
 		for batch_count, (labels, data) in enumerate(dataloader, start=1):
 			data = data.to(device, non_blocking=True)
+			data = BiGRU.augment_coordinates(data, generator)
 			labels = labels.to(device, non_blocking=True)
 			active_index = 0 if phase == "bert" else 1
 			optimizer = optimizers[active_index]
@@ -208,10 +213,10 @@ def test_model(
 	if batch_count == 0:
 		raise ValueError("The dataloader must contain at least one batch.")
 
-	return {
-		"bigru": (total_bigru_loss / batch_count, total_bigru_correct / total_count if total_count else 0.0),
-		"bert": (total_bert_loss / batch_count, total_bert_correct / total_count if total_count else 0.0),
-	}
+	overall_loss = total_bert_loss / batch_count
+	overall_accuracy = total_bert_correct / total_count if total_count else 0.0
+
+	return overall_loss, overall_accuracy
 
 
 def main(_train_path=None, _validation_path=None, _test_path=None, _bigru_path=None, _save_path=None):

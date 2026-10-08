@@ -5,6 +5,31 @@ from copy import deepcopy
 from pathlib import Path
 from data import chars, pad_variable, GeometricDataset
 
+SEED = 0
+
+
+def augment_coordinates(data, generator, *, jitter_pixels=3.0, noise_std=0.01, p=0.5):
+	"""Apply coordinate jitter and gaussian noise"""
+	if data.ndim != 3 or data.size(-1) != 2:
+		return data
+	if p <= 0:
+		return data
+	if not torch.is_floating_point(data):
+		data = data.float()
+
+	mask = torch.rand(data.shape[:2], generator=generator, device=data.device) < p
+	if not mask.any():
+		return data
+
+	jitter_x = ((torch.rand(data.shape[:2], generator=generator, device=data.device) - 0.5) * 2.0) * (jitter_pixels / 1440.0)
+	jitter_y = ((torch.rand(data.shape[:2], generator=generator, device=data.device) - 0.5) * 2.0) * (jitter_pixels / 854.0)
+	noise = torch.randn(data.shape, generator=generator, device=data.device, dtype=data.dtype) * noise_std
+
+	augmented = data.clone()
+	augmented[:, :, 0] = torch.where(mask, augmented[:, :, 0] + jitter_x + noise[:, :, 0], augmented[:, :, 0])
+	augmented[:, :, 1] = torch.where(mask, augmented[:, :, 1] + jitter_y + noise[:, :, 1], augmented[:, :, 1])
+	return augmented
+
 class BiGRU(nn.Module):
 	def __init__(self, input_size=2, hidden_size=128, num_layers=2, output_size=len(chars)):
 		super().__init__()
@@ -66,6 +91,8 @@ def train_model(
 	use_amp=True,
 	use_compile=False,
 	checkpoint_path=None,
+	seed=SEED,
+	use_augmentation=True,
 ):
 	"""Train, optionally early-stop on validation loss, and return the model."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -78,6 +105,7 @@ def train_model(
 	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 	amp_enabled = use_amp and device.type == "cuda"
 	scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
+	generator = torch.Generator(device=device).manual_seed(seed)
 	best_validation_loss = float("inf")
 	best_state = None
 	stale_epochs = 0
@@ -89,6 +117,8 @@ def train_model(
 		for labels, data in dataloader:
 			# Flatten only at the loss boundary; the recurrent model keeps sequence structure.
 			data = data.to(device, non_blocking=True)
+			if use_augmentation:
+				data = augment_coordinates(data, generator)
 			labels = labels.flatten().to(device, non_blocking=True)
 			optimizer.zero_grad(set_to_none=True)
 			try:
@@ -167,6 +197,7 @@ def test_model(
 		model = torch.compile(model, dynamic=True)
 	model.eval()
 	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
+	generator = torch.Generator(device=device).manual_seed(seed)
 	amp_enabled = use_amp and device.type == "cuda"
 	total_loss = 0.0
 	total_correct = 0

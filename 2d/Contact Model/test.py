@@ -111,10 +111,9 @@ def main():
 		print(f"Test Accuracy: {bigru_accuracy:.4%}")
 
 		print("######### Testing SANCD")
-		sacnd_metrics = SANCD.test_model(SANCD.instantiate_model(sacnd_path, bigru_path, bert_path), test_dataloader)
-		for component, (loss, accuracy) in sacnd_metrics.items():
-			print(f"{component.title()} Test Loss: {loss:.4f}")
-			print(f"{component.title()} Test Accuracy: {accuracy:.4%}")
+		sacnd_loss, sacnd_accuracy = SANCD.test_model(SANCD.instantiate_model(sacnd_path, bigru_path, bert_path), test_dataloader)
+		print(f"Overall Test Loss: {sacnd_loss:.4f}")
+		print(f"Overall Test Accuracy: {sacnd_accuracy:.4%}")
 
 
 if __name__ == "__main__":

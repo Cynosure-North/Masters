@@ -186,17 +186,15 @@ def test_model(model, dataloader):
 		).item()
 
 		predictions = logits.argmax(dim=-1).cpu()
-		for prediction, target, input_length, target_length in zip(
-			predictions, targets, input_lengths, target_lengths):
-
+		for prediction, target, in zip(predictions, targets):
 			total_sequences += 1
 			collapsed = []
 			previous = None
-			for token in prediction[:input_length].tolist():
+			for token in prediction.tolist():
 				if token != 0 and token != previous:
 					collapsed.append(token)
 				previous = token
-			expected = target[:target_length].tolist()
+			expected = target.tolist()
 			correct_sequences += int(collapsed == expected)
 		batch_count += 1
 

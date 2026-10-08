@@ -135,6 +135,33 @@ def reset_incremental_prefix_beam_search():
 	global prev_prefixes
 	prev_prefixes = None
 	
+def tune_alpha_beta(
+	ctc_sequences,
+	lm,
+	texts,
+	*,
+	alpha_values=(0.1, 0.2, 0.3, 0.5, 0.7),
+	beta_values=(1, 3, 5, 8, 12),
+	k=100,
+	prune=0.001,
+):
+	"""Grid-search alpha/beta pairs on a set of target strings and return the best pair."""
+	if len(ctc_sequences) != len(texts):
+		raise ValueError("ctc_sequences and texts must have the same length.")
+	best_result = None
+	for alpha in alpha_values:
+		for beta in beta_values:
+			matches = 0
+			for ctc, expected in zip(ctc_sequences, texts):
+				predicted = prefix_beam_search(ctc, lm, k=k, alpha=alpha, beta=beta, prune=prune)
+				matches += int(predicted == expected)
+			score = matches / max(len(texts), 1)
+			candidate = (score, alpha, beta)
+			if best_result is None or candidate[0] > best_result[0]:
+				best_result = candidate
+	return {"alpha": best_result[1], "beta": best_result[2], "score": best_result[0]} if best_result else {"alpha": 0.3, "beta": 5, "score": 0.0}
+
+
 def prefix_beam_search(
 	ctc,
 	lm,
