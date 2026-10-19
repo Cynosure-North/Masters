@@ -5,12 +5,16 @@
 from collections import defaultdict, deque
 import editdistance
 import re
+import numpy as np
 from pathlib import Path
 from torch.utils.data import DataLoader
 from data import chars, MotionDataset
+import LLM
+import TCN
+import pickle
 
 
-alphabet = chars + ['-', '>']	# Blank character and end character
+_alphabet = chars + ['-', '>']	# Blank character and end character
 num_features = len(chars) + 1	# Also the non-character (when no key is pressed)
 convergence_delay=6
 
@@ -29,6 +33,7 @@ def incremental_prefix_beam_search(
 	alpha=0.30,
 	beta=5,		# TODO: Tune llm compensation factor
 	prune=0.001,
+	alphabet=_alphabet,
 	convergence_delay=6
 ):
 	"""
@@ -46,7 +51,7 @@ def incremental_prefix_beam_search(
 	global prev_Pb, prev_Pnb, previous_prefixes
 
 	if previous_prefixes is None:
-		previous_prefixes = deque(maxlen=(convergence_delay if convergence_delay != 0 else None))
+		previous_prefixes = deque(maxlen=(convergence_delay if convergence_delay != 0 else 1))
 		previous_prefixes.append([''])
 
 	pruned_alphabet = [alphabet[idx] for idx, val in enumerate(ctc) if val > prune]
@@ -91,20 +96,35 @@ def incremental_prefix_beam_search(
 					Pnb[extended] += char_prob * prev_Pnb[extended]
 
 
-	current_prefixes = {key: val1 + val2 for ((key, val1), (_, val2)) in zip(Pb.items(), Pnb.items())}
+	def merge(dict1, dict2):
+		new_dict = {}
+		keys = dict1.keys() | dict2.keys()
+		for key in keys:
+			if key in dict1 and key in dict2:
+				new_dict[key] = dict1[key] + dict2[key]
+			elif key in dict1:
+				new_dict[key] = dict1[key]
+			else:
+				new_dict[key] = dict2[key]
+		return new_dict
+
+	current_prefixes = merge(Pb, Pnb)
+	
+	# Select most probable prefixes
 	word_count = lambda l: re.findall(r'\w+[\s>]', l)
 	scorer = lambda l: current_prefixes[l] * (len(word_count(l)) + 1) ** beta
 		
 	if convergence_delay == 0:
 		prev_Pb, prev_Pnb = Pb, Pnb
-		return sorted(current_prefixes, key=scorer, reverse=True)[0].strip('>')
+		current_prefixes = sorted(current_prefixes, key=scorer, reverse=True)[:min(k, len(current_prefixes))]
+		previous_prefixes.append(current_prefixes)
+		return current_prefixes[0].strip('>')
 
 	# Force convergence
 	if len(previous_prefixes) < convergence_delay:
 		prev_Pb, prev_Pnb = Pb, Pnb
-		# Select most probable prefixes
 		current_prefixes = sorted(current_prefixes, key=scorer, reverse=True)
-		previous_prefixes.append(current_prefixes[:k])
+		previous_prefixes.append(current_prefixes[:min(k, len(current_prefixes))])
 		return ''
 
 	# The reason I select prefixes from convergence_delay frames ago is because in the prefixes from
@@ -128,14 +148,13 @@ def incremental_prefix_beam_search(
 			prev_Pnb[k] = v
 	current_prefixes = list(filter(lambda l: l.startswith(converged_prefix), current_prefixes))
 
-	current_prefixes = sorted(current_prefixes, key=scorer, reverse=True)
-	previous_prefixes.append(current_prefixes[:k])
+	current_prefixes = sorted(current_prefixes, key=scorer, reverse=True)[:min(k, len(current_prefixes))]
+	previous_prefixes.append(current_prefixes)
 
 	return previous_prefixes[0][0].strip('>')
 
 def reset_incremental_prefix_beam_search():
-	global prev_prefixes
-	prev_prefixes = None
+	previous_prefixes = None
 
 def prefix_beam_search(
 	ctc,
@@ -144,11 +163,13 @@ def prefix_beam_search(
 	k=100,
 	alpha=0.30,
 	beta=5,
-	prune=0.001):
+	prune=0.001,
+	alphabet=_alphabet
+):
 
 	final_output = ""
 	for frame in ctc:
-		final_output = incremental_prefix_beam_search(frame, lm, k=k, alpha=alpha, beta=beta, prune=prune, convergence_delay=0)
+		final_output = incremental_prefix_beam_search(frame, lm, k=k, alpha=alpha, beta=beta, prune=prune, convergence_delay=0, alphabet=alphabet)
 
 	reset_incremental_prefix_beam_search()
 
@@ -180,16 +201,14 @@ def tune_alpha_beta(
 	return (best_result[1], best_result[2], best_result[0])
 
 def run_tuning():
-	from test import random_split, dir_path
-	import LLM
-	import TCN
+	from test import random_split, dir_path		# Import here to avoid circular imports
 
 	train_path, _, _ = random_split(dir_path)
 	project_dir = Path(__file__).resolve().parent
 	llm_path = project_dir / "downloaded" / "gemma-4-e2b-q4_k_m.gguf"
-	tcn_path = project_dir / "trained" / "test_TCN_weights.pth"
+	tcn_path = project_dir / "trained" / "test_TCN.pth"
 
-	llm = LLM.LLM(llm_path)
+	llm = LLM.LLM(llm_path).get_word_probability
 	tcn = TCN.instantiate_model(tcn_path).eval()
 	device = next(tcn.parameters()).device
 	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
@@ -211,16 +230,52 @@ def run_tuning():
 
 	print("Loaded data, running sweep")
 
-	alpha, beta, score = tune_alpha_beta(
-		ctc_outputs,
-		llm.get_word_probability,
-		ctc_labels)
+	alpha, beta, score = tune_alpha_beta(ctc_outputs, llm, ctc_labels)
 
 	print(f"Best alpha: {alpha}")
 	print(f"Best beta: {beta}")
 	print(f"Best result (correct sequences/total sequences): {score:.2%}")
 
-if __name__ == "__main__":
-	run_tuning()
+def greedy_decoder(ctc, alphabet=_alphabet):
+	"""
+	Performs greedy decoding (max decoding) on the output of a CTC network.
 
-# TODO: 
+	Args:
+	ctc (np.ndarray): The CTC output. Should be a 2D array (timesteps x alphabet_size)
+
+	Returns:
+	string: The decoded CTC output.
+	"""
+
+	# Collapse repeating characters
+	arg_max = np.argmax(ctc, axis=1)
+	repeat_filter = arg_max[1:] != arg_max[:-1]
+	repeat_filter = np.concatenate([[True], repeat_filter])
+	collapsed = arg_max[repeat_filter]
+
+	# discard blank tokens (the blank is always last in the alphabet)
+	blank_filter = np.where(collapsed < (len(alphabet) - 1))[0]
+	final_sequence = collapsed[blank_filter]
+	full_decode = ''.join([alphabet[letter_idx] for letter_idx in final_sequence])
+	return full_decode.strip('>')
+
+def test():
+	# Test data from https://github.com/corticph/prefix-beam-search
+	# llm_path = Path(__file__).resolve().parent / "downloaded" / "gemma-4-e2b-q4_k_m.gguf"
+	llm_path = Path(__file__).resolve().parent / "downloaded" / "Qwen3-0.6B-Base.Q4_K_S.gguf"
+	llm = LLM.LLM(llm_path).get_word_probability
+
+	alphabet = 'abcdefghijklmnopqrstuvwxyz >-'
+
+	test_dir = Path(r"C:\Users\mno64\Datasets\prefix-beam-search\examples")
+	for example_file in test_dir.iterdir():
+		example = pickle.load(open(example_file, 'rb'))
+		greedy_out = greedy_decoder(example, alphabet)
+		pbs_out = prefix_beam_search(example, llm, alphabet=alphabet)
+		print(f"{example_file}")
+		print(f"Greedy Decode: {greedy_out}")
+		print(f"Prefix Beam Search: {pbs_out}")
+	
+
+if __name__ == "__main__":
+	test()

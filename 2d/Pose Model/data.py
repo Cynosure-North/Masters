@@ -3,7 +3,7 @@ import torch
 from pathlib import Path
 import numpy as np
 
-chars = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', ' ', ',', '.']
+chars = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', ' ']
 SEED = 0
 
 finger_list = ["l_little", "l_ring", "l_middle", "l_index", "l_thumb", "r_little", "r_ring", "r_middle", "r_index", "r_thumb"]
@@ -15,9 +15,9 @@ finger_to_keys = {
 	"l_thumb": " ",
 	"r_thumb": " ",
 	"r_index": "yhbujnikm",
-	"r_middle": "uikm,ol",
-	"r_ring": "ik,ol.p",
-	"r_little": "lp." }
+	"r_middle": "uikmol",
+	"r_ring": "ikolp",
+	"r_little": "lp" }
 
 # key_to_finger = {}
 # for char in 'abcdefghijklmnopqrstuvwxyz':

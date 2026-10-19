@@ -146,7 +146,7 @@ def main():
 	train_path, val_path, test_path = random_split(dir_path)
 	project_dir = Path(__file__).resolve().parent
 	llm_path = project_dir / "downloaded" / "gemma-4-e2b-q4_k_m.gguf"
-	save_path = project_dir / "trained" / "test_TCN_weights.pth"
+	save_path = project_dir / "trained" / "test_TCN.pth"
 
 	if True or not save_path.exists():
 		print("######### Training and testing TCN")
