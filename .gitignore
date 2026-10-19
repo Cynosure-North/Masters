@@ -1,9 +1,10 @@
 /.vscode
-*.pyc
-*.gguf
+
 *.pth
-*.npy
+*.json
 *.uint8
+
+*.pyc
 __pycache__
 .cache
 _cache

@@ -7,7 +7,6 @@ from data import chars, pad_variable, GeometricDataset
 
 SEED = 0
 
-
 def augment_coordinates(data, generator, *, jitter_pixels=3.0, noise_std=0.01, p=0.5):
 	"""Apply coordinate jitter and gaussian noise"""
 	if data.ndim != 3 or data.size(-1) != 2:
@@ -197,7 +196,6 @@ def test_model(
 		model = torch.compile(model, dynamic=True)
 	model.eval()
 	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
-	generator = torch.Generator(device=device).manual_seed(seed)
 	amp_enabled = use_amp and device.type == "cuda"
 	total_loss = 0.0
 	total_correct = 0

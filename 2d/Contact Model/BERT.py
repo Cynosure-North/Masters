@@ -224,10 +224,6 @@ class LengthBucketBatchSampler(BatchSampler):
 def _mlm_loss(logits, labels, loss_fn):
 	return loss_fn(logits.reshape(-1, logits.size(-1)), labels.reshape(-1))
 
-def checkpoint_path_for(save_path, epoch, batch_count, *, checkpoint_interval=50_000):
-	"""Return a path in the same directory as save_path with a checkpoint-specific basename."""
-	save_path = Path(save_path)
-
 def train_model(
 	model,
 	dataloader,
@@ -250,10 +246,7 @@ def train_model(
 	if use_compile and hasattr(torch, "compile"):
 		compiled_model = model
 		model = torch.compile(model, dynamic=True)
-	optimizer_kwargs = {"lr": 1e-4}
-	if device.type == "cuda":
-		optimizer_kwargs["fused"] = True
-	optimizer = torch.optim.AdamW(model.parameters(), **optimizer_kwargs)
+	optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, fused=(device.type == "cuda"))
 	loss_fn = loss_fn or nn.CrossEntropyLoss(ignore_index=-100)
 	amp_enabled = use_amp and device.type == "cuda"
 	scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
