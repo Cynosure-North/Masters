@@ -118,3 +118,5 @@ def main():
 
 if __name__ == "__main__":
 	main()
+
+# TODO: In testing SACND is of no help compared to BiGRU (98.44 vs 98.47), I'll need to test but it may help more with messier data

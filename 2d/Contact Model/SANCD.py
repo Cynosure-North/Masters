@@ -263,4 +263,3 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _bigru_path=N
 if __name__ == "__main__":
 	main()
 	
-# TODO: SANCD does nothing and perhaps does worse than BiGRU alone

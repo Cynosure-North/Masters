@@ -3,6 +3,7 @@
 *.pth
 *.json
 *.uint8
+*.npy
 
 *.pyc
 __pycache__
