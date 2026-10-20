@@ -48,60 +48,6 @@ class RbfSurfaceFit:
 
 SurfaceFit = PlaneFit | EllipsoidFit | ConeFit | CylinderFit | RbfSurfaceFit
 
-
-def same_plane(
-	first: SurfaceFit,
-	second: SurfaceFit,
-	distance_tolerance: float = 1e-2,
-	angle_tolerance_degrees: float = 1.0,
-) -> bool:
-	"""Return whether both fits describe the same plane within tolerances.
-
-	The distance tolerance is measured in the point-cloud coordinate units;
-	the angular tolerance is measured in degrees. Plane normals may point in
-	opposite directions and are treated as equivalent.
-	"""
-	if not isinstance(first, PlaneFit) or not isinstance(second, PlaneFit):
-		return False
-	if (
-		not np.isfinite(distance_tolerance)
-		or not np.isfinite(angle_tolerance_degrees)
-		or distance_tolerance < 0
-		or not 0 <= angle_tolerance_degrees <= 90
-	):
-		return False
-
-	first_point = np.asarray(first.point, dtype=float)
-	second_point = np.asarray(second.point, dtype=float)
-	first_normal = np.array(first.normal, dtype=float, copy=True)
-	second_normal = np.array(second.normal, dtype=float, copy=True)
-	if (
-		first_point.shape != (3,)
-		or second_point.shape != (3,)
-		or first_normal.shape != (3,)
-		or second_normal.shape != (3,)
-		or not all(np.isfinite(value).all() for value in (
-			first_point, second_point, first_normal, second_normal
-		))
-	):
-		return False
-
-	first_length = np.linalg.norm(first_normal)
-	second_length = np.linalg.norm(second_normal)
-	if first_length == 0 or second_length == 0:
-		return False
-
-	first_normal /= first_length
-	second_normal /= second_length
-	cosine_similarity = abs(float(first_normal @ second_normal))
-	minimum_similarity = np.cos(np.deg2rad(angle_tolerance_degrees))
-	if cosine_similarity < minimum_similarity:
-		return False
-
-	plane_separation = abs(float((second_point - first_point) @ first_normal))
-	return plane_separation <= distance_tolerance
-
-
 def signed_distance_to_surface(
 	point: np.ndarray,
 	surface: SurfaceFit,

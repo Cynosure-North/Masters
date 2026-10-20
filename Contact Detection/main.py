@@ -1,5 +1,5 @@
 import numpy as np
-from fit_shape import fit_surface, same_plane
+from fit_shape import fit_surface
 
 # TODO: Report which hand touched
 # TODO: I'll want to store the point of last contact to ensure the keys appear in the right place
@@ -21,7 +21,7 @@ def calibration(frames):
 		if max_compression < 0.2:
 			return 0, 20	# even on hard surfaces fingers have some squish of their own
 		else:
-			return delta, end_of_compression
+			return max_compression, end_of_compression
 	
 	frames = frames[:, :5, :]		# discard wrist + knuckles
 
@@ -35,7 +35,7 @@ def calibration(frames):
 
 class Surface():
 	def __init__(self, shape, compressibility):
-		self.shape = shape
+		self.shape = shape	# 2d = isinstance(surface, PlaneFit)
 		self.compressibility = compressibility
 	
 class ContactModeller():
@@ -45,11 +45,9 @@ class ContactModeller():
 		
 		# (5 fingertips + 4 wrist markers) * xyz
 		self.left_hand, self.right_hand = Surface(*calibration(frames[:27, :])), Surface(*calibration(frames[27:, :]))
-		self.2d = same_plane(self.left_hand.shape, self.right_hand.shape)
-		# TODO: If both hands are on the same plane fall back to 2d models
-		# 	I'll still need to do contact detection
 		
 	def calculate_touch_points(frames):
+		pass
 		# TODO: Determine single unique contact moment
 		# 	- probably the first frame? but I could give a few frames as a buffer to discard erroneous keystrokes
 		# 	- if frames are negative skip them
