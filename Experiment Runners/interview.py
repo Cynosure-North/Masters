@@ -1,4 +1,5 @@
 import tkinter as tk
+import tkinter.messagebox
 import sounddevice as sd
 import time
 import wave
@@ -44,7 +45,7 @@ def record_interview(save_dir: Path) -> None:
 	def save_current_recording() -> None:
 		output_path = save_dir / "interview.wav"
 		frames = bytes(state["frames"])
-		if frames and not _audio_has_speech(frames, int(state["sample_rate"]), int(state["channels"])):
+		if frames and not _audio_has_speech(frames):
 			if not tk.messagebox.askyesno(
 				"Low audio detected",
 				"This recording does not appear to contain speech. Do you want to keep it anyway?",
@@ -68,7 +69,7 @@ def record_interview(save_dir: Path) -> None:
 				samplerate=int(state["sample_rate"]),
 				channels=int(state["channels"]),
 				dtype="int16",
-				callback=lambda indata, frames, time_info, status: state["frames"].extend(indata.tobytes()),
+				callback=lambda indata, _frames, _time_info, _status: state["frames"].extend(indata.tobytes()),
 			)
 			state["stream"] = stream
 			stream.start()
@@ -79,9 +80,6 @@ def record_interview(save_dir: Path) -> None:
 		stream = state["stream"]
 		if stream is not None:
 			stream.stop()
-		state["active"] = False
-		state["stream"] = None
-		button.config(text="Start recording")
 		duration = time.monotonic() - float(state["started_at"])
 		if duration < 30:
 			if tk.messagebox.askyesno(
@@ -90,6 +88,9 @@ def record_interview(save_dir: Path) -> None:
 			):
 				if save_current_recording():
 					stream.close()
+					state["active"] = False
+					state["stream"] = None
+					button.config(text="Start recording")
 					root.destroy()
 			else:
 				stream.start()
@@ -97,6 +98,9 @@ def record_interview(save_dir: Path) -> None:
 		else:
 			if save_current_recording():
 				stream.close()
+				state["active"] = False
+				state["stream"] = None
+				button.config(text="Start recording")
 				root.destroy()
 			return
 
@@ -111,3 +115,6 @@ def record_interview(save_dir: Path) -> None:
 	status.pack()
 	root.protocol("WM_DELETE_WINDOW", root.destroy)
 	root.mainloop()
+
+if __name__ == "__main__":
+	record_interview(Path(__file__).resolve().parent)
