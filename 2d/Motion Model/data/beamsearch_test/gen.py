@@ -58,6 +58,14 @@ def generate_librispeech_ctc(dataset_dir=DEFAULT_DATASET_DIR, output_dir=DEFAULT
 					if not audio_file.is_file():
 						raise FileNotFoundError(f"Audio file listed in transcript not found: {audio_file}")
 
+					stem = _safe_sentence_stem(sentence)
+					name_counts[stem] = name_counts.get(stem, 0) + 1
+					duplicate_suffix = "" if name_counts[stem] == 1 else f"_{name_counts[stem]}"
+					output_path = output_dir / f"{stem}{duplicate_suffix}.npy"
+					if output_path.exists():
+						print(f"Skipping file {output_path}, file already exists")
+						continue
+
 					waveform, sample_rate = torchaudio.load(audio_file)
 					if waveform.shape[0] > 1:
 						waveform = waveform.mean(dim=0, keepdim=True)
@@ -70,10 +78,6 @@ def generate_librispeech_ctc(dataset_dir=DEFAULT_DATASET_DIR, output_dir=DEFAULT
 					emission, _ = acoustic_model(waveform)
 					probabilities = torch.softmax(emission[0], dim=-1).cpu().numpy().astype(np.float32)
 
-					stem = _safe_sentence_stem(sentence)
-					name_counts[stem] = name_counts.get(stem, 0) + 1
-					duplicate_suffix = "" if name_counts[stem] == 1 else f"_{name_counts[stem]}"
-					output_path = output_dir / f"{stem}{duplicate_suffix}.npy"
 					np.save(output_path, probabilities)
 					saved_paths.append(output_path)
 
