@@ -131,6 +131,9 @@ class SmallTwoTransformerLM(nn.Module):
 	def config(self):
 		return self.model.config
 
+	def reset(self):
+		self._probability_cache = OrderedDict()
+
 	def to(self, *args, **kwargs):
 		result = super().to(*args, **kwargs)
 		parameters = list(self.parameters())
@@ -294,6 +297,8 @@ def train_model(
 
 	except KeyboardInterrupt:
 		print("Training interrupted")
+		for file in checkpoint_path.dirname().glob("LLM_*.pth"):
+			file.unlink()
 	finally:
 		close = getattr(train_corpus, "close", None)
 		if close is not None:
