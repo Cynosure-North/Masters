@@ -1,3 +1,7 @@
+# Test the beam search implementation using data from an existing source
+#
+# Data is from https://www.openslr.org/12/
+
 import re
 from pathlib import Path
 
@@ -17,11 +21,9 @@ def _safe_sentence_stem(sentence):
 
 
 def generate_librispeech_ctc(dataset_dir=DEFAULT_DATASET_DIR, output_dir=DEFAULT_OUTPUT_DIR):
-	"""Save one frame-by-label CTC probability matrix per LibriSpeech utterance.
-
-	LibriSpeech transcript files are named ``*.trans.txt`` and contain lines of
-	``utterance-id transcript``. Output arrays are float32 ``.npy`` files shaped
-	``(time_frames, labels)``; columns follow ``bundle.get_labels()`` order.
+	"""
+	LibriSpeech transcript files are named ``*.trans.txt`` and contain lines of ``utterance-id transcript``.
+	Output arrays are float32 ``.npy`` files shaped ``(time_frames, labels)``; columns follow ``bundle.get_labels()`` order.
 	"""
 	import torchaudio
 

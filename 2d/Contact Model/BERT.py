@@ -294,14 +294,14 @@ def train_model(
 
 			if batch_count % 500 == 0: print(f"batch {batch_count:<6n} of epoch {epoch:<3n} finished -- loss: {batch_loss:.4f}")
 			if save_path is not None and batch_count % checkpoint_interval == 0:
-				checkpoint = save_path.with_name(f"BERT_{epoch}_{batch_count//checkpoint_interval}.pth")
+				checkpoint = save_path.with_name(f"BERT_{epoch}_{batch_count // checkpoint_interval}.pth")
 				torch.save(model.state_dict(), checkpoint)
-				print(f"Saved checkpoint, epoch: {epoch} batch {batch_count // checkpoint_interval}")
+				print(f"Saved checkpoint, epoch: {epoch}_{batch_count // checkpoint_interval}")
 
 				# Keep the most recent checkpoint in the current save directory while
 				# preserving the configured basename pattern for the active run.
 				save_path.with_name(
-					f"BERT_{epoch}_{max(batch_count-checkpoint_interval, 0)//checkpoint_interval}.pth") \
+					f"BERT_{epoch}_{max(batch_count-checkpoint_interval, 0) // checkpoint_interval}.pth") \
 				.unlink(missing_ok=True)
 
 
