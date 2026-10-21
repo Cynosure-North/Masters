@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk
 
 
-def consent_screen() -> tuple[bool, bool] | None:
+def main() -> tuple[bool, bool] | None:
 	"""Show the consent form and return optional permissions, or None if closed."""
 	root = tk.Tk()
 	root.title("Participant Consent")
@@ -134,4 +134,4 @@ def consent_screen() -> tuple[bool, bool] | None:
 	return result
 
 if __name__ == "__main__":
-	consent_screen()
+	main()

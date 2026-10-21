@@ -1,5 +1,5 @@
 import tkinter as tk
-import tkinter.messagebox
+import tkinter.messagebox	# I do actually need to import it separately	https://stackoverflow.com/a/39435558
 import sounddevice as sd
 import time
 import wave
@@ -26,7 +26,7 @@ def _save_wav(path: Path, frames: bytes, sample_rate: int, channels: int) -> Non
 		wav_file.setframerate(sample_rate)
 		wav_file.writeframes(frames)
 
-def record_interview(save_dir: Path) -> None:
+def main(save_dir: Path) -> None:
 	"""Ask the participant to record an interview clip and save it as interview.wav."""
 	root = tk.Tk()
 	root.title("Interview Recording")
@@ -117,4 +117,4 @@ def record_interview(save_dir: Path) -> None:
 	root.mainloop()
 
 if __name__ == "__main__":
-	record_interview(Path(__file__).resolve().parent)
+	main(Path(__file__).resolve().parent)
