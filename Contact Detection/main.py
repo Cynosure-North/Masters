@@ -1,15 +1,6 @@
 import numpy as np
 from fit_shape import fit_surface
 
-# TODO: Report which hand touched
-# TODO: I'll want to store the point of last contact to ensure the keys appear in the right place
-# TODO: Figure out how to integrate this with the AI
-# 	- Convert to UVs?
-#		- But that would loose orientation and topology
-#	- Measure which shapes fit the most and use those?
-#	- Not sure how the motion model will handle different surfaces for each hand
-#	Whatever I do, it probably makes sense to have a preprocessing layer so I don't have to train a bunch of different models
-
 
 def calibration(frames):
 	def compressibility(reference_points, subsequent_frames):
@@ -35,6 +26,8 @@ def calibration(frames):
 
 class Surface():
 	def __init__(self, shape, compressibility):
+		# IDEA: I'm unsure how the motion model will work with a split setup
+		# IDEA: I'm unsure how well it will work if the keyboard is in a traditional layout rather than split
 		self.shape = shape	# 2d = isinstance(surface, PlaneFit)
 		self.compressibility = compressibility
 	
@@ -54,7 +47,7 @@ class ContactModeller():
 		# 	- Determine which finger contacted, multiple fingers could be in contact at any one time
 		# 	Not sure if its the best place to do it here rather than in the interactive mode functions
 
-
+		# IDEA: I should try averaging the output of the pose and contact models (another model on top may better but gaf)
 
 class InteractiveContactModeller():
 	pass

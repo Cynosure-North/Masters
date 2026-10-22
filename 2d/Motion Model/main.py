@@ -66,7 +66,7 @@
 
 import LLM
 import TCN
-from BeamSearch import incremental_prefix_beam_search
+import BeamSearch
 
 def interactive(tnn, llm):
 	pass
@@ -75,6 +75,15 @@ def interactive(tnn, llm):
 	# If a new keypress has come in from the TNN update the next char
 	# Else use the off-frames to run the llm in batches (of 4?) to manage performance
 
+def main():
+	print("######### Training LLM")
+	LLM.main(50_000)
+
+	print("######### Training TCN")
+	TCN.main()
+
+	print("######### Tuning Beam Search")
+	BeamSearch.run_tuning()
 
 if __name__ == "__main__":
-	interactive()
+	main()

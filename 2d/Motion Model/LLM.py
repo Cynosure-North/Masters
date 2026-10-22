@@ -509,7 +509,7 @@ def train_model(
 	return model
 
 
-def main():
+def main(steps = None):
 	print()
 	save_path = Path(__file__).resolve().parent / "trained" / "best_LLM.pth"
 	train_source = CommonCrawlNewsStream("train", seed=SEED, max_warcs=16)
@@ -529,7 +529,7 @@ def main():
 	train_corpus = StreamingTextCorpus(train_source, tokenizer)
 
 	print("######### Training LLM")
-	trained_model = train_model(model, train_corpus, validation_corpus, save_path)
+	trained_model = train_model(model, train_corpus, validation_corpus, save_path, steps=steps)
 
 	print("training complete")
 	torch.save(trained_model.state_dict(), save_path)

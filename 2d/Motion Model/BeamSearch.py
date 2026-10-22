@@ -35,7 +35,7 @@ class BeamSearcher():
 		*,
 		beam_width=100,
 		alpha=0.30,
-		beta=12,		# TODO: Tune llm compensation factor
+		beta=12,
 		prune=0.001,
 		convergence_delay=6
 	):
@@ -310,8 +310,7 @@ def run_tuning():
 	import LLM
 	language_model = LLM.instantiate_model(
 		llm_path,
-		compile_model=True,
-	)
+		compile_model=True)
 	alpha, beta, score = tune_alpha_beta(ctc_outputs, ctc_labels, language_model)
 
 	print(f"Best alpha: {alpha}")
@@ -350,7 +349,7 @@ def _load_sentence_named_ctc(test_dir):
 
 	ctc_sequences = []
 	texts = []
-	for example_file in ctc_files[:10]:		# FIXME
+	for example_file in ctc_files[:10]:		# FIXME: I'm using a subset of the files to test BeamSearch because it runs slow, I'd like to speed it up and run a full test
 		model_ctc = np.load(example_file, allow_pickle=False)
 		if model_ctc.ndim != 2 or model_ctc.shape[1] != len(model_labels):
 			raise ValueError(
