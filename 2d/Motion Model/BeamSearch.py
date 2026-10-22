@@ -9,16 +9,20 @@ import numpy as np
 from pathlib import Path
 from torch.utils.data import DataLoader
 from data import chars, MotionDataset
-import LLM
 import TCN
 
+import ref_beamsearch
 
 
-_alphabet = chars + ['>', '-']	# End character, then CTC blank (last column)
+alphabet = chars + '-'	# CTC blank (last column)
+char_to_index = {character: index for index, character in enumerate(alphabet)}
 
-class BeamSearch:
-	def __init__(self, llm_path):
-		self.llm = LLM.instantiate_model(llm_path)
+
+class BeamSearcher():
+	def __init__(self, language_model):
+		if language_model is None:
+			raise ValueError("language_model is required")
+		self.llm = language_model
 
 		self.prev_Pb, self.prev_Pnb = defaultdict(float), defaultdict(float)
 		self.prev_Pb[''] = 1		# Probability of blank character
@@ -29,17 +33,16 @@ class BeamSearch:
 		self,
 		ctc,
 		*,
-		k=100,
+		beam_width=100,
 		alpha=0.30,
-		beta=10,		# TODO: Tune llm compensation factor
+		beta=12,		# TODO: Tune llm compensation factor
 		prune=0.001,
-		alphabet=_alphabet,
 		convergence_delay=6
 	):
 		"""
 		Args:
 			ctc (array): The CTC output from the latest frame. Should be a 1D array (alphabet_size + '-')
-			k (int): The beam width. Will keep the 'k' most likely candidates at each timestep.
+			beam_width (int): Keep the n most likely candidates at each timestep.
 			alpha (float): The language model weight. Should usually be between 0 and 1.
 			beta (float): The language model compensation term. The higher the 'alpha', the higher the 'beta'.
 			prune (float): Only extend prefixes with chars with an emission probability higher than 'prune'.
@@ -52,22 +55,31 @@ class BeamSearch:
 			self.previous_prefixes = deque(maxlen=(convergence_delay if convergence_delay != 0 else 1))
 			self.previous_prefixes.append([''])
 
-		pruned_alphabet = [alphabet[idx] for idx, val in enumerate(ctc) if val > prune]
+		pruned_alphabet = [
+			character for character, value in zip(alphabet, ctc)
+			if value > prune
+		]
+
 		Pb, Pnb = defaultdict(float), defaultdict(float)
 		blank_prob = ctc[-1]
 
-		for prefix in self.previous_prefixes[-1]:
-			
-			# Once you hit the end character stick with that
-			if len(prefix) > 0 and prefix[-1] == '>':
-				Pb[prefix] = self.prev_Pb[prefix]
-				Pnb[prefix] = self.prev_Pnb[prefix]
-				continue  
+		lm_candidates = list(dict.fromkeys(		# Precalculate lm probabilities in batches
+			(prefix + c).strip()
+			for prefix in self.previous_prefixes[-1]
+			for c in pruned_alphabet
+			if c != '-' and not (prefix and c == prefix[-1])
+			and len(prefix.replace(' ', '')) > 0 and c == ' '
+		))
+		lm_log_probabilities = dict(zip(
+			lm_candidates,
+			self.llm.get_word_log_probabilities(lm_candidates),
+		))
 
+		for prefix in self.previous_prefixes[-1]:
 			for c in pruned_alphabet:
-				char_prob = ctc[alphabet.index(c)]
+				char_prob = ctc[char_to_index[c]]
 				extended = prefix + c
-				
+
 				# Extending with a blank
 				if c == '-':
 					Pb[prefix] += blank_prob * (self.prev_Pb[prefix] + self.prev_Pnb[prefix])
@@ -79,9 +91,9 @@ class BeamSearch:
 						Pnb[prefix] += char_prob * self.prev_Pnb[prefix]
 
 					# Extending with space/end character - triggers LM likelihood check
-					elif len(prefix.replace(' ', '')) > 0 and c in (' ', '>'):
+					elif len(prefix.replace(' ', '')) > 0 and c == ' ':
 						# With a convergence_delay of only a handful of frames I'm unsure how much this can really do
-						lm_prob = self.llm.get_word_probability(extended.strip(' >')) ** alpha
+						lm_prob = np.exp(alpha * lm_log_probabilities[extended.strip()])
 						Pnb[extended] += lm_prob * char_prob * (self.prev_Pb[prefix] + self.prev_Pnb[prefix])
 					# Extending with any other character
 					else:
@@ -108,32 +120,33 @@ class BeamSearch:
 		current_prefixes = merge(Pb, Pnb)
 		
 		# Select most probable prefixes
-		word_count = lambda l: re.findall(r'\w+[\s>]', l)
+		word_count = lambda l: re.findall(r'\w+\s', l)
 		scorer = lambda l: current_prefixes[l] * (len(word_count(l)) + 1) ** beta
+		ranked_prefixes = sorted(current_prefixes, key=scorer, reverse=True)
 			
 		if convergence_delay == 0:
 			self.prev_Pb, self.prev_Pnb = Pb, Pnb
-			current_prefixes = sorted(current_prefixes, key=scorer, reverse=True)[:min(k, len(current_prefixes))]
+			current_prefixes = ranked_prefixes[:min(beam_width, len(ranked_prefixes))]
 			self.previous_prefixes.append(current_prefixes)
-			return current_prefixes[0].strip('>')
+			return current_prefixes[0].strip()
 
 		# Force convergence
 		if len(self.previous_prefixes) < convergence_delay:
 			self.prev_Pb, self.prev_Pnb = Pb, Pnb
 			current_prefixes = sorted(current_prefixes, key=scorer, reverse=True)
-			self.previous_prefixes.append(current_prefixes[:min(k, len(current_prefixes))])
+			self.previous_prefixes.append(current_prefixes[:min(beam_width, len(current_prefixes))])
 			return ''
 
 		# The reason I select prefixes from convergence_delay frames ago is because in the prefixes from
 		# this frame I can't tell when each character was added, so I can't select a stable sub-prefix
-		relevance = {}
+		irrelevance = {}
 		for old_prefix in self.previous_prefixes[0]:
 			score = 0
 			for new_prefix in current_prefixes:
 				levenshtein = editdistance.eval(old_prefix, new_prefix)
 				score += (Pb[new_prefix] + Pnb[new_prefix]) * levenshtein
-			relevance[old_prefix] = score * scorer(old_prefix)
-		converged_prefix = sorted(relevance, key=relevance.get, reverse=True)[0]
+			irrelevance[old_prefix] = score * (len(old_prefix) ** beta)
+		converged_prefix = sorted(irrelevance, key=irrelevance.get)[0]
 
 		# Drop dead paths
 		self.prev_Pb, self.prev_Pnb = defaultdict(float), defaultdict(float)
@@ -143,44 +156,83 @@ class BeamSearch:
 		for k, v in Pnb.items():
 			if k.startswith(converged_prefix):
 				self.prev_Pnb[k] = v
-		current_prefixes = list(filter(lambda l: l.startswith(converged_prefix), current_prefixes))
+		current_prefixes = {k: v for k, v in current_prefixes.items() if k.startswith(converged_prefix)}
 
-		current_prefixes = sorted(current_prefixes, key=scorer, reverse=True)[:min(k, len(current_prefixes))]
+		current_prefixes = sorted(current_prefixes, key=scorer, reverse=True)[:min(beam_width, len(current_prefixes))]
 		self.previous_prefixes.append(current_prefixes)
 
-		return self.previous_prefixes[0][0].strip('>')
+		return self.previous_prefixes[0][0].strip()
 
-	def reset_incremental_prefix_beam_search(self):
+	def finalize(self, *, alpha=0.30, beta=12):
+		"""Finalize an utterance, including a word that has no CTC separator.
+
+		Interactive CTC input often stops immediately after the final character.
+		Score each retained hypothesis as if a word boundary followed it so the
+		last word receives the same language-model treatment as earlier words.
+		"""
+		if self.previous_prefixes is None or not self.previous_prefixes[-1]:
+			return ''
+
+		prefixes = self.previous_prefixes[-1]
+		acoustic_scores = {
+			prefix: self.prev_Pb[prefix] + self.prev_Pnb[prefix]
+			for prefix in prefixes
+		}
+		unfinished = [
+			prefix.rstrip()
+			for prefix in prefixes
+			if prefix and prefix.rstrip()
+		]
+		lm_log_scores = dict(zip(
+			unfinished,
+			self.llm.get_word_log_probabilities(unfinished),
+		))
+
+		def score(prefix):
+			acoustic_score = acoustic_scores[prefix]
+			if acoustic_score <= 0:
+				return float('-inf')
+			final_word = prefix.rstrip()
+			lm_log_score = lm_log_scores.get(final_word, 0.0)
+			word_count = len(re.findall(r'\w+\s', prefix))
+			return (
+				np.log(acoustic_score)
+				+ alpha * lm_log_score
+				+ beta * np.log(word_count + 1)
+			)
+
+		return max(prefixes, key=score).strip()
+
+	def reset(self):
 		self.previous_prefixes = None
-		self.llm.reset()
+		self.prev_Pb, self.prev_Pnb = defaultdict(float), defaultdict(float)
+		self.prev_Pb[''] = 1
+		self.prev_Pnb[''] = 0
 
-def prefix_beam_search(
-	ctc,
-	llm_path,
-	*,
-	k=100,
-	alpha=0.30,
-	beta=5,
-	prune=0.001,
-	alphabet=_alphabet
-):
-
-	final_output = ""
-	bs = BeamSearch(llm_path)
-
+def prefix_beam_search(ctc, beam_searcher, **kwargs):
+	"""Decode a complete CTC sequence and finalize its last word."""
+	final_output = ''
 	for frame in ctc:
-		final_output = bs.incremental_prefix_beam_search(frame, k=k, alpha=alpha, beta=beta, prune=prune, convergence_delay=0, alphabet=alphabet)
+		final_output = beam_searcher.incremental_prefix_beam_search(
+			frame, convergence_delay=0, **kwargs
+		)
 
+	if len(ctc) > 0:
+		final_output = beam_searcher.finalize(
+			alpha=kwargs.get('alpha', 0.30),
+			beta=kwargs.get('beta', 12),
+		)
+
+	beam_searcher.reset()
 	return final_output
 	
 def tune_alpha_beta(
 	ctc_sequences,
-	llm_path,
-	texts=None,
+	texts,
+	language_model,
 	*,
-	alpha_values=(0, 0.001, 0.005, 0.1, 0.2, 0.3, 0.5, 0.7),
+	alpha_values=(0, 0.001, 0.005, 0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 0.9),
 	beta_values=(0, 0.5, 1, 1.5, 3, 5, 8, 12),
-	alphabet=_alphabet,
 ):
 	"""Grid-search decoder weights on arrays or sentence-named .npy exports.
 
@@ -188,88 +240,85 @@ def tune_alpha_beta(
 	derive reference strings from their filenames. Otherwise, provide CTC arrays
 	and matching ``texts`` as before.
 	"""
-	if isinstance(ctc_sequences, (str, Path)):
-		if texts is not None:
-			raise ValueError("Do not pass texts when loading examples from a directory")
-		ctc_sequences, texts = _load_sentence_named_ctc(ctc_sequences)
+	ctc_sequences, texts = ctc_sequences[:10], texts[:10]
+
+	if ctc_sequences is None:
+		raise ValueError("CTC sequences are required")
 	if texts is None:
-		raise ValueError("texts are required when ctc_sequences is not a directory")
-	texts = [_reference_text(text) for text in texts]
-	if len(ctc_sequences) != len(texts):
-		raise ValueError("ctc_sequences and texts must have the same length.")
+		raise ValueError("texts are required")
 	if not texts:
 		raise ValueError("At least one CTC sequence is required for tuning")
+	# if len(ctc_sequences) != len(texts):
+	# 	raise ValueError("ctc_sequences and texts must have the same length.")
 
-	best_result = (-float('inf'), -1, -1)
+
+	beam_searcher = BeamSearcher(language_model)
+	best_result = (0, -1, -1)
+
 	for alpha in alpha_values:
 		for beta in beta_values:
-			score = evaluate_alpha_beta(
-				ctc_sequences, texts, llm_path, alpha=alpha, beta=beta, alphabet=alphabet
-			)
-			candidate = (score, alpha, beta)
-			print(f"alpha: {alpha:<5g}, beta: {beta:<3g} - exact match: {score:.3f}")
-			if candidate[0] > best_result[0]:
-				best_result = candidate
+			score = 1 - (sum(
+				editdistance.eval(ref_beamsearch.prefix_beam_search(ctc, beam_searcher.llm.get_word_probability, alpha=alpha, beta=beta), expected)
+				# prefix_beam_search(ctc, beam_searcher, alpha=alpha, beta=beta, alphabet=alphabet) == expected
+				for ctc, expected in zip(ctc_sequences, texts)
+			) / sum (len(text) for text in texts))
+
+			print(f"alpha: {alpha:<5g}, beta: {beta:<3g} - matching characters: {score:.2%}")
+
+			if score > best_result[0]:
+				best_result = (score, alpha, beta)
+
 	return (best_result[1], best_result[2], best_result[0])
 
 
-def evaluate_alpha_beta(ctc_sequences, texts, llm_path, *, alpha, beta, alphabet=_alphabet):
-	"""Return exact-sequence accuracy for one alpha/beta decoder configuration."""
-	if len(ctc_sequences) != len(texts):
-		raise ValueError("ctc_sequences and texts must have the same length.")
-	if not texts:
-		return 0.0
-	matches = sum(
-		prefix_beam_search(ctc, llm_path, alpha=alpha, beta=beta, alphabet=alphabet) == expected
-		for ctc, expected in zip(ctc_sequences, texts)
-	)
-	return matches / len(texts)
-
-
-def _reference_text(text):
-	"""Normalize either a transcript string or the motion model's token IDs."""
-	if isinstance(text, str):
-		return " ".join(re.sub(r"[^a-z ]", " ", text.lower()).split())
-	if hasattr(text, "tolist"):
-		text = text.tolist()
-	return "".join(chars[int(token)] for token in text)
-
 def run_tuning():
-	from test import random_split, dir_path		# Import here to avoid circular imports
-
-	train_path, _, _ = random_split(dir_path)
 	project_dir = Path(__file__).resolve().parent
-	tcn_path = project_dir / "trained" / "best_TCN.pth"
 	llm_path = project_dir / "trained" / "best_LLM.pth"
+	test_dir = project_dir / "data" / "beamsearch_test"
 
-	tcn = TCN.instantiate_model(tcn_path).eval()
-	device = next(tcn.parameters()).device
-	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
-	loader = DataLoader(
-		MotionDataset(train_path),
-		collate_fn=TCN.collate_batch,
-		**loader_kwargs)
+	if True:
+		print("Using pregenerated CTC output")
+		ctc_outputs, ctc_labels = _load_sentence_named_ctc(test_dir)
+	else:
+		from test import random_split, dir_path		# Import here to avoid circular imports
+		train_path, _, _ = random_split(dir_path)
 
-	ctc_outputs = []
-	ctc_labels = []
-	for features, labels, _, _ in loader:
-		logits = tcn(features.to(device, non_blocking=True))
+		print("Using TCN output")
+		tcn_path = project_dir / "trained" / "best_TCN.pth"
 
-		for sample_logits, label in zip(logits, labels):
-			sample_logits = sample_logits.cpu().tolist()
+		tcn = TCN.instantiate_model(tcn_path).eval()
+		device = next(tcn.parameters()).device
+		loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
+		loader = DataLoader(
+			MotionDataset(train_path),
+			collate_fn=TCN.collate_batch,
+			**loader_kwargs)
 
-			ctc_outputs.append(sample_logits)
-			ctc_labels.append(label)
+		ctc_outputs = []
+		ctc_labels = []
+		for features, labels, _, _ in loader:
+			logits = tcn(features.to(device, non_blocking=True))
 
-	print("Loaded data, running sweep")
+			for sample_logits, label in zip(logits, labels):
+				sample_logits = sample_logits.cpu().tolist()
 
-	alpha, beta, score = tune_alpha_beta(ctc_outputs, llm_path, ctc_labels)
+				ctc_outputs.append(sample_logits)
+				ctc_labels.append(label)
+
+		print("Loaded data, running sweep")
+
+	import LLM
+	language_model = LLM.instantiate_model(
+		llm_path,
+		compile_model=True,
+	)
+	alpha, beta, score = tune_alpha_beta(ctc_outputs, ctc_labels, language_model)
 
 	print(f"Best alpha: {alpha}")
 	print(f"Best beta: {beta}")
-	print(f"Best result (correct sequences/total sequences): {score:.2%}")
+	print(f"Best result (correct characters/total characters): {score:.2%}")
 
-def greedy_decoder(ctc, alphabet=_alphabet):
+def greedy_decoder(ctc):
 	# Collapse repeating characters
 	arg_max = np.argmax(ctc, axis=1)
 	repeat_filter = arg_max[1:] != arg_max[:-1]
@@ -280,7 +329,7 @@ def greedy_decoder(ctc, alphabet=_alphabet):
 	blank_filter = np.where(collapsed < (len(alphabet) - 1))[0]
 	final_sequence = collapsed[blank_filter]
 	full_decode = ''.join([alphabet[letter_idx] for letter_idx in final_sequence])
-	return full_decode.strip("->")
+	return full_decode.strip()
 
 
 def _load_sentence_named_ctc(test_dir):
@@ -293,7 +342,7 @@ def _load_sentence_named_ctc(test_dir):
 
 	bundle = torchaudio.pipelines.WAV2VEC2_ASR_BASE_10M
 	model_labels = bundle.get_labels()
-	beam_alphabet = _alphabet
+	beam_alphabet = alphabet
 	beam_indices = {character: index for index, character in enumerate(beam_alphabet)}
 	ctc_files = sorted(test_dir.glob("*.npy"))
 	if not ctc_files:
@@ -301,7 +350,7 @@ def _load_sentence_named_ctc(test_dir):
 
 	ctc_sequences = []
 	texts = []
-	for example_file in ctc_files:
+	for example_file in ctc_files[:10]:		# FIXME
 		model_ctc = np.load(example_file, allow_pickle=False)
 		if model_ctc.ndim != 2 or model_ctc.shape[1] != len(model_labels):
 			raise ValueError(
@@ -324,7 +373,7 @@ def _load_sentence_named_ctc(test_dir):
 		# gen.py suffixes repeated transcript filenames with _2, _3, etc.
 		text = re.sub(r"_\d+$", "", example_file.stem)
 		ctc_sequences.append(ctc)
-		texts.append(_reference_text(text))
+		texts.append(re.sub(f"[^{chars}]", " ", text.lower()))
 
 	return ctc_sequences, texts
 
@@ -333,15 +382,27 @@ def test():
 	llm_path = Path(__file__).resolve().parent / "trained" / "best_LLM.pth"
 	test_dir = Path(__file__).resolve().parent / "data" / "beamsearch_test"
 	ctc_sequences, texts = _load_sentence_named_ctc(test_dir)
+
+	import LLM
+	language_model = LLM.instantiate_model(
+		llm_path,
+		compile_model=True,
+	)
+	beam_searcher = BeamSearcher(language_model)
 	for ctc, expected_text in zip(ctc_sequences, texts):
 		greedy_out = greedy_decoder(ctc)
-		pbs_out = prefix_beam_search(ctc, llm_path)
-		print(f"\nReference: {expected_text}")
+		pbs_out = prefix_beam_search(ctc, beam_searcher)
+		# ref_pbs_out = ref_beamsearch.prefix_beam_search(ctc, beam_searcher.llm.get_word_probability)
+		print()
+		print(f"Reference:     {expected_text}")
 		print(f"Greedy Decode: {greedy_out}")
-		print(f"Prefix Beam Search: {pbs_out}")
+		print(f"My PBS:        {pbs_out}")
+		# print(f"Ref PBS:       {ref_pbs_out}")
 	
 
 if __name__ == "__main__":
 	test()
 	
-# TODO: beamsearch/llm seems to be unwilling to insert a space?
+# The final word is often wrong
+# There's one example which is fucked (#8)
+# I'd like if it was faster

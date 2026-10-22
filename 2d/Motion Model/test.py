@@ -138,7 +138,7 @@ def random_split(path):
 	return train_path, val_path, test_path
 
 def main():
-	from BeamSearch import prefix_beam_search
+	from BeamSearch import prefix_beam_search, BeamSearcher
 	import TCN
 	import LLM
 	print()
@@ -163,7 +163,7 @@ def main():
 			**loader_kwargs)
 		TCN.test_model(tcn, loader)
 
-		llm = LLM.instantiate_model(llm_path)
+		beam_searcher = BeamSearch(llm_path)
 		print("######### Testing TCN with CTC prefix beam search")
 
 		incorrect_chars = 0
@@ -182,7 +182,7 @@ def main():
 					sample_logits = sample_logits.cpu().tolist()
 					predicted_text = prefix_beam_search(
 						sample_logits,
-						llm.get_word_probability)
+						beam_searcher)
 					expected_text = "".join(chars[token - 1] for token in label.tolist())
 
 					incorrect_chars += editdistance.eval(expected_text, predicted_text)

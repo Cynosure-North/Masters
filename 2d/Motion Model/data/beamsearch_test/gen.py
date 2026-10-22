@@ -80,6 +80,13 @@ def generate_librispeech_ctc(dataset_dir=DEFAULT_DATASET_DIR, output_dir=DEFAULT
 					emission, _ = acoustic_model(waveform)
 					probabilities = torch.softmax(emission[0], dim=-1).cpu().numpy().astype(np.float32)
 
+					# Wav2Vec uses | as its word-boundary token. A deterministic
+					# final separator lets the decoder score the last word as well.
+					terminal_frame = np.zeros((1, probabilities.shape[1]), dtype=np.float32)
+					separator_index = bundle.get_labels().index("|")
+					terminal_frame[0, separator_index] = 1.0
+					probabilities = np.concatenate((probabilities, terminal_frame), axis=0)
+
 					np.save(output_path, probabilities)
 					saved_paths.append(output_path)
 
