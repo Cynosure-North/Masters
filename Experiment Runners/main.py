@@ -4,7 +4,6 @@ import multiprocessing as mp
 
 from optitrack_interface import OptiTrackRecorder
 from consent import main as consent_screen
-import tutorial
 from phase_1 import Phase1
 from interview import main as record_interview
 
@@ -38,8 +37,6 @@ def main():
 	consent(participant_dir)
 
 	if phase == 1:
-		tutorial.phase_1()
-
 		recv, send = mp.Pipe(duplex=False)
 		recorder = OptiTrackRecorder(recv)
 		phase1 = Phase1(send, participant_dir, quotes)
