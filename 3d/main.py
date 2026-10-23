@@ -28,6 +28,9 @@ class Surface():
 	def __init__(self, shape, compressibility):
 		# CONCERN: I'm unsure how the motion model will work with a split setup
 		# CONCERN: I'm unsure how well it will work if the keyboard is in a traditional layout rather than split
+		# NOTE: Even for plane fits, it's still good to use the plane SDF rather than just the 2d
+		# implementation, so I can handle angled planes. So the pipeline is the same regardless of
+		# whether it's 2d or 3d
 		self.shape = shape	# 2d = isinstance(surface, PlaneFit)
 		self.compressibility = compressibility
 		
@@ -51,6 +54,24 @@ class ContactModeller():
 			"r_middle": (11, self.right_hand),
 			"r_ring": (12, self.right_hand),
 			"r_little": (13,  self.right_hand) }
+
+	def unwrap_adjustment(self, frame):
+		# NOTE: I'm unsure if I'll even need this for the pose model
+		"""(for contact and pose models)
+			unwrap surface, and also report normal + curvature of surface at that point"""
+
+		# TODO: convert 3d points to surface UVs
+		
+		# TODO: calculate normal and curvature at that point (may help to cache, idk), and append that
+
+		# Final structure: [U, V, normal, curvature], NOTE: I think I may need another curvature value
+
+	def SDF_adjustment(self, frame):
+		"""(for the motion model)
+			for each finger, in each frame report the (delta of the) signed distance from that finger to the surface of the corresponding model """
+		np.hstack((frame, np.zeros((54, 1))))
+		for idx, row in enumerate(frame):
+			row[-1] = signed_distance_to_surface(row[:3], self.left_hand.shape if idx < 27 else self.right_hand.shape)
 		
 	def calculate_touch_points(self, frames):
 		""" Identify the first frame of each finger press """
@@ -71,13 +92,11 @@ class ContactModeller():
 		# TODO: 3d conversion
 		# Note that these don't give the model the surface topology, could be good future work
 		
-		# For contact and pose models, unwrap surface, and also report normal + curvature of surface at that point
 		
-		# For motion model, for each finger, in each frame report the (delta of the) signed distance from that finger to the surface of the corresponding model
 		
-		# Even for plane fits, it's still good to use the plane SDF, rather than just the 2d implementation so I can handle angled planes
 		
-		def SDF_adjustment(frame):
+
+			
 
 
 class InteractiveContactModeller():

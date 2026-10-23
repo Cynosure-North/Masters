@@ -54,7 +54,7 @@ def signed_distance_to_surface(
 ) -> float:
 	"""Return a signed distance or a fast radial distance approximation.
 
-	For a plane this is the exact signed perpendicular distance.
+	For a plane this is the exact signed perpendicular distance
 	For an ellipsoid, the sign is exact and the magnitude is a radial approximation.
 	For a cone this is the signed distance to its infinite single-nappe side, with the apex treated as the nearest point behind the cone.
 	For a cylinder, this is the exact signed radial distance to its infinite surface.
