@@ -15,7 +15,7 @@ def OptiTrackRecorder():
 
 	def start_server(self):
 		with self.streaming_client:
-			while self.running:
+			while True:
 				time.sleep(1)
 
 				# Poll optitrack
@@ -44,7 +44,7 @@ def OptiTrackRecorder():
 
 	def end_recording(self, save_path: str):
 		self.recording = False
-		with open(save_path, 'w') as file:
+		with open(Path(save_path), 'w') as file:
 			file.write(str(self.frames))
 		self.frames = []
 

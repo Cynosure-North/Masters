@@ -4,7 +4,6 @@ import multiprocessing as mp
 
 from optitrack_interface import OptiTrackRecorder
 from consent import main as consent_screen
-import tutorial
 from phase_1 import Phase1
 from interview import main as record_interview
 
@@ -29,8 +28,8 @@ def consent(participant_dir):
 		(participant_dir / "no_quotes").touch()
 
 def main():
-	parent = Path(r"C:\Users\mno64\Thesis\Mocap Data\phase" + str(phase))
 	phase = 1
+	parent = Path(r"C:\Users\mno64\Thesis\Mocap Data\phase" + str(phase))
 	participant_dir = make_session_directory(parent)
 	with open(r"C:\Users\mno64\Thesis\Experiment Runners\data\phrases.txt") as f:
 		quotes = f.read().splitlines()
@@ -38,14 +37,14 @@ def main():
 	consent(participant_dir)
 
 	if phase == 1:
-		tutorial.phase_1()
-
 		recv, send = mp.Pipe(duplex=False)
 		recorder = OptiTrackRecorder(recv)
-		phase1 = Phase1(participant_dir, send, quotes)
+		phase1 = Phase1(send, participant_dir, quotes)
 		
-		mp.Process(target=recorder.start_server).run()
-		mp.Process(target=phase1.run).run()
+		mp.Process(target=recorder.start_server).start()
+		mp.Process(target=phase1.run).start()
 
 		record_interview()
 		
+if __name__ == "__main__":
+	main()

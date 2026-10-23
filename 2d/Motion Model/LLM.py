@@ -1,4 +1,5 @@
 import math
+import re
 from collections import OrderedDict
 from pathlib import Path
 
@@ -28,8 +29,11 @@ class BPETokenizer:
 
 	@classmethod
 	def filter_text(cls, text):
-		"""Discard every character outside the motion model's supported alphabet."""
-		return "".join(character for character in str(text) if character in cls.ALLOWED_CHARS)
+		"""Lowercase text and turn unsupported characters into word separators."""
+		cleaned = []
+		for character in str(text).lower():
+			cleaned.append(character if character in cls.ALLOWED_CHARS else " ")
+		return " ".join("".join(cleaned).split())
 
 	def fit(self, texts):
 		"""Train byte-level BPE merges from an iterable of text documents."""
@@ -102,7 +106,10 @@ class SmallTwoTransformerLM(nn.Module):
 		n_head=8,
 		n_embd=256,
 		ffn_dim=1024,
-		dropout=0.1):
+		dropout=0.1,
+		quantize=False,
+		compile_model=False,
+		reduced_precision=True):
 
 		super().__init__()
 		self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -122,10 +129,20 @@ class SmallTwoTransformerLM(nn.Module):
 			bos_token_id=tokenizer.BOS_ID,
 			eos_token_id=tokenizer.BOS_ID,
 		)
+		if getattr(GPT2LMHeadModel, "_supports_sdpa", False):
+			config._attn_implementation = "sdpa"
 		self.model = GPT2LMHeadModel(config)
 		self.model.to(self.device)
+		self.inference_dtype = (
+			torch.bfloat16 if self.device.type == "cuda" and torch.cuda.is_bf16_supported()
+			else torch.float16 if self.device.type == "cuda"
+			else torch.float32
+		)
 		self._probability_cache = OrderedDict()
 		self._probability_cache_size = 4096
+		self.reduced_precision = reduced_precision
+		self._quantize_requested = quantize
+		self._compile_requested = compile_model
 
 	@property
 	def config(self):
@@ -139,7 +156,75 @@ class SmallTwoTransformerLM(nn.Module):
 		parameters = list(self.parameters())
 		if parameters:
 			self.device = parameters[0].device
+		self.inference_dtype = (
+			torch.bfloat16 if self.device.type == "cuda" and torch.cuda.is_bf16_supported()
+			else torch.float16 if self.device.type == "cuda"
+			else torch.float32
+		)
 		return result
+
+	def _autocast(self):
+		return torch.autocast(
+			device_type=self.device.type,
+			dtype=self.inference_dtype,
+			enabled=self.device.type == "cuda" and self.reduced_precision,
+		)
+
+	def optimize_inference(
+		self,
+		*,
+		quantize=False,
+		compile_model=False,
+		compile_backend=None,
+	):
+		"""Apply optional inference optimizations after checkpoint loading."""
+		if quantize:
+			if self.device.type != "cpu":
+				raise ValueError("Dynamic quantization is supported only for CPU inference")
+			self.model = torch.quantization.quantize_dynamic(
+				self.model, {nn.Linear}, dtype=torch.qint8
+			)
+		if compile_model:
+			if quantize:
+				raise ValueError("Do not combine dynamic quantization and torch.compile")
+			if not hasattr(torch, "compile"):
+				raise RuntimeError("This PyTorch version does not provide torch.compile")
+			if compile_backend is None:
+				compile_backend = "inductor"
+				if self.device.type == "cuda":
+					try:
+						import triton  # noqa: F401
+					except ImportError:
+						compile_backend = "aot_eager"
+						print(
+							"Triton is unavailable; using torch.compile backend "
+							"'aot_eager'. This enables compilation but may not "
+							"improve inference speed."
+						)
+			compile_options = {"backend": compile_backend}
+			if compile_backend == "inductor":
+				compile_options["options"] = {"triton.cudagraphs": False}
+			self.model = torch.compile(self.model, **compile_options)
+
+	def warm_up(self):
+		"""Compile the inference paths before the first real language-model call."""
+		if not self._compile_requested:
+			return
+		bos = torch.tensor([[self.tokenizer.BOS_ID]], dtype=torch.long, device=self.device)
+		next_token = torch.tensor([[0]], dtype=torch.long, device=self.device)
+		with torch.inference_mode(), self._autocast():
+			self.model(input_ids=bos, use_cache=False)
+			output = self.model(
+				input_ids=bos,
+				use_cache=True,
+				return_dict=True,
+			)
+			self.model(
+				input_ids=next_token,
+				past_key_values=output.past_key_values,
+				use_cache=True,
+				return_dict=True,
+			)
 
 	def forward(self, token_ids):
 		if token_ids.ndim != 2:
@@ -151,48 +236,129 @@ class SmallTwoTransformerLM(nn.Module):
 		return self.model(input_ids=token_ids, use_cache=False).logits
 
 	def get_word_probability(self, text):
+		return self.get_word_probabilities([text])[0]
+
+	def _prepare_word_score(self, text):
 		text = self.tokenizer.filter_text(text)
-		cached = self._probability_cache.pop(text, None)
-		if cached is not None:
-			self._probability_cache[text] = cached
-			return cached
 		if " " in text:
 			prefix, word = text.rsplit(" ", 1)
 			prefix += " "
 		else:
 			prefix, word = "", text
 		if not word:
-			return 1.0
+			return None
 
-		prefix_ids = self.tokenizer.encode(prefix)
-		full_ids = self.tokenizer.encode(prefix + word)
+		prefix_ids = self.tokenizer.tokenizer.encode(prefix).ids
+		# Score the completed word and its following space, which provides an
+		# explicit word-boundary likelihood instead of scoring only the spelling.
+		# Call the backend directly because the public encode() normalizes away
+		# trailing whitespace, while the boundary is intentional here.
+		full_ids = self.tokenizer.tokenizer.encode(prefix + word + " ").ids
 		first_word_token = 0
 		for prefix_token, full_token in zip(prefix_ids, full_ids):
 			if prefix_token != full_token:
 				break
 			first_word_token += 1
 		if first_word_token >= len(full_ids):
-			return 1.0
+			return None
+		return full_ids, first_word_token
 
+	def _score_word_sequentially(self, full_ids, first_word_token):
+		"""Preserve rolling-window scoring for exceptionally long inputs."""
 		log_probability = 0.0
-		with torch.inference_mode():
+		with torch.inference_mode(), self._autocast():
 			for position in range(first_word_token, len(full_ids)):
-				context = [self.tokenizer.BOS_ID, *full_ids[:position]][-self.model.config.n_positions :]
+				context = [self.tokenizer.BOS_ID, *full_ids[:position]][-self.config.n_positions :]
 				input_ids = torch.tensor([context], dtype=torch.long, device=self.device)
-				logits = self.model(input_ids=input_ids).logits[0, -1]
+				logits = self.model(input_ids=input_ids, use_cache=False).logits[0, -1].float()
 				log_probability += F.log_softmax(logits, dim=-1)[full_ids[position]].item()
+		return log_probability / (len(full_ids) - first_word_token)
 
-		probability = math.exp(log_probability / max(1, len(full_ids) - first_word_token))
-		self._probability_cache[text] = probability
-		if len(self._probability_cache) > self._probability_cache_size:
+	def _score_word_with_cache(self, full_ids, first_word_token):
+		"""Score a word while reusing transformer key/value attention states."""
+		prefix = [self.tokenizer.BOS_ID, *full_ids[:first_word_token]]
+		targets = full_ids[first_word_token:]
+		input_ids = torch.tensor([prefix], dtype=torch.long, device=self.device)
+		with torch.inference_mode(), self._autocast():
+			output = self.model(
+				input_ids=input_ids, use_cache=True, return_dict=True
+			)
+			past_key_values = output.past_key_values
+			log_probability = F.log_softmax(output.logits[0, -1].float(), dim=-1)[targets[0]].item()
+			for target in targets[1:]:
+				token = torch.tensor([[target]], dtype=torch.long, device=self.device)
+				output = self.model(
+					input_ids=token,
+					past_key_values=past_key_values,
+					use_cache=True,
+					return_dict=True,
+				)
+				past_key_values = output.past_key_values
+				log_probability += F.log_softmax(
+					output.logits[0, -1].float(), dim=-1
+				)[target].item()
+		return log_probability / len(targets)
+
+	def get_word_log_probabilities(self, texts, *, batch_size=16, use_cache=True):
+		"""Return length-normalized log probabilities for candidate words."""
+		if batch_size < 1:
+			raise ValueError("batch_size must be at least 1")
+		if isinstance(texts, str):
+			texts = [texts]
+		results = []
+		for original_text in texts:
+			text = self.tokenizer.filter_text(original_text)
+			cached = self._probability_cache.pop(text, None)
+			if cached is not None:
+				self._probability_cache[text] = cached
+				results.append(math.log(max(cached, torch.finfo(torch.float32).tiny)))
+				continue
+			prepared = self._prepare_word_score(text)
+			if prepared is None:
+				results.append(0.0)
+				continue
+			full_ids, first_word_token = prepared
+			if len(full_ids) > self.config.n_positions:
+				log_score = self._score_word_sequentially(full_ids, first_word_token)
+			elif use_cache:
+				log_score = self._score_word_with_cache(full_ids, first_word_token)
+			else:
+				log_score = self._score_word_batch(full_ids, first_word_token)
+			probability = math.exp(log_score)
+			self._probability_cache[text] = probability
+			results.append(log_score)
+		while len(self._probability_cache) > self._probability_cache_size:
 			self._probability_cache.popitem(last=False)
-		return probability
+		return results
+
+	def _score_word_batch(self, full_ids, first_word_token):
+		input_ids = torch.tensor(
+			[[self.tokenizer.BOS_ID, *full_ids[:-1]]],
+			dtype=torch.long,
+			device=self.device,
+		)
+		with torch.inference_mode(), self._autocast():
+			logits = self.model(input_ids=input_ids, use_cache=False).logits.float()[0]
+		positions = torch.arange(first_word_token, len(full_ids), device=self.device)
+		targets = torch.tensor(full_ids[first_word_token:], dtype=torch.long, device=self.device)
+		return F.log_softmax(logits[positions], dim=-1).gather(
+			1, targets[:, None]
+		).sum().item() / targets.numel()
+
+	def get_word_probabilities(self, texts, *, batch_size=16):
+		return [math.exp(score) for score in self.get_word_log_probabilities(
+			texts, batch_size=batch_size
+		)]
 
 def instantiate_model(
 	model_path,
 	*,
 	tokenizer_training_documents=None,
 	vocab_size=5000,
+	quantize=False,
+	compile_model=False,
+	compile_backend=None,
+	reduced_precision=True,
 ):
 	"""Load a model/tokenizer pair, or initialize and save a new tokenizer/model."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -213,16 +379,31 @@ def instantiate_model(
 		tokenizer.fit(tokenizer_training_documents)
 		tokenizer.save(tokenizer_path)
 
-	model = SmallTwoTransformerLM(tokenizer).to(device)
+	model = SmallTwoTransformerLM(
+		tokenizer,
+		reduced_precision=reduced_precision,
+	)
 	if checkpoint_path.exists():
 		print(f"Loading model weights from {checkpoint_path}")
-		checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+		checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True, mmap=True)
 		state_dict = (
 			checkpoint["model_state_dict"]
 			if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint
 			else checkpoint
 		)
-		model.load_state_dict(state_dict, strict=True)
+		try:
+			model.load_state_dict(state_dict, strict=True, assign=True)
+		except TypeError:
+			model.load_state_dict(state_dict, strict=True)
+		model.model.tie_weights()
+		del state_dict, checkpoint
+	model.to(device)
+	model.optimize_inference(
+		quantize=quantize,
+		compile_model=compile_model,
+		compile_backend=compile_backend,
+	)
+	model.warm_up()
 	model.eval()
 	return model
 
@@ -259,9 +440,29 @@ def train_model(
 	if validation_interval < 1:
 		raise ValueError("validation_interval must be at least 1")
 
+	checkpoint_path = Path(checkpoint_path)
+	checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+	checkpoint_pattern = re.compile(r"^LLM_\d+\.pth$")
+
+	def cleanup_checkpoints(keep=None):
+		for candidate in checkpoint_path.parent.iterdir():
+			if (
+				candidate.is_file()
+				and checkpoint_pattern.fullmatch(candidate.name)
+				and candidate != keep
+			):
+				candidate.unlink()
+
+	def save_checkpoint(state_dict, destination):
+		temporary_path = destination.with_name(f".{destination.name}.tmp")
+		torch.save(state_dict, temporary_path)
+		temporary_path.replace(destination)
+
+	cleanup_checkpoints()
 	optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 	best_validation_loss = math.inf
 	best_state = None
+	best_checkpoint = None
 	step = 0
 
 	try:
@@ -290,15 +491,14 @@ def train_model(
 						key: value.detach().cpu().clone()
 						for key, value in model.state_dict().items()
 					}
-					torch.save(model.state_dict(), checkpoint_path.with_name(f"LLM_{step//validation_interval}.pth"))
-				
-					# clean up previous checkpoints
-					checkpoint_path.with_name(f"LLM_{(step//validation_interval)-2}.pth").unlink(missing_ok=True)
+					best_checkpoint = checkpoint_path.with_name(
+						f"LLM_{step//validation_interval}.pth"
+					)
+					save_checkpoint(best_state, best_checkpoint)
+					cleanup_checkpoints(keep=best_checkpoint)
 
 	except KeyboardInterrupt:
 		print("Training interrupted")
-		for file in checkpoint_path.dirname().glob("LLM_*.pth"):
-			file.unlink()
 	finally:
 		close = getattr(train_corpus, "close", None)
 		if close is not None:
@@ -309,7 +509,7 @@ def train_model(
 	return model
 
 
-def main():
+def main(steps = None):
 	print()
 	save_path = Path(__file__).resolve().parent / "trained" / "best_LLM.pth"
 	train_source = CommonCrawlNewsStream("train", seed=SEED, max_warcs=16)
@@ -329,7 +529,7 @@ def main():
 	train_corpus = StreamingTextCorpus(train_source, tokenizer)
 
 	print("######### Training LLM")
-	trained_model = train_model(model, train_corpus, validation_corpus, save_path)
+	trained_model = train_model(model, train_corpus, validation_corpus, save_path, steps=steps)
 
 	print("training complete")
 	torch.save(trained_model.state_dict(), save_path)

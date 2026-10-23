@@ -243,4 +243,4 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 if __name__ == "__main__":
 	main()
 
-# TODO: TCN is cooked
+# TODO: TCN is cooked, perhaps because I'm not using the full keyboard? IDK needs more testing
