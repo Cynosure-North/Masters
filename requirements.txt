@@ -5,6 +5,7 @@ editdistance
 natnet
 tokenizers
 transformers
+keyboard
 
 # Extras, only needed for training
 # torchaudio
