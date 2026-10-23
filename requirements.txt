@@ -1,0 +1,12 @@
+torch
+numpy
+sounddevice
+editdistance
+natnet
+tokenizers
+transformers
+
+# Extras, only needed for training
+# torchaudio
+# requests
+# urllib3
