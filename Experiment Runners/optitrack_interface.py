@@ -101,7 +101,7 @@ class OptiTrackRecorder:
 				if self.calibrated_origin is None:
 					self.calibrated_origin = calculate_origin(self.frames)
 					if self.calibrated_origin is not None:
-						self.frames = list(map(lambda l: l - self.calibrated_origin, self.frames))
+						self.frames = list(map(lambda l: (l[0], l[1] - self.calibrated_origin), self.frames))
 
 				if self.test:
 					# now = time.monotonic()

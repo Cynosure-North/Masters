@@ -263,7 +263,7 @@ def nearest_wrist_marker(
 
 
 prev_skeleton_pos = np.array([])
-def frame_point_array(frame: DataFrame, description: DataDescriptions, origin: np.ndarray | None) -> tuple[float, np.ndarray | None]:
+def frame_point_array(frame: DataFrame, description: DataDescriptions, origin: np.ndarray | None) -> tuple[float, np.ndarray] | None:
 	"""Flatten a single frame into a (14, 3) NumPy array
 
 	The canonical ordering of tracked points in the flattened frame array is:
@@ -343,6 +343,7 @@ def calculate_origin(frames: np.ndarray):
 	valid_points = []
 
 	for frame in frames:
+		frame  = frame[1]		# frame is a tuple of (timestamp, np.ndarray)
 		# If the wrist direction vector is 0 the marker is not being tracked, so we should skip that frame
 		if frame[1] == [0.0, 0.0, 0.0] or frame[8] == [0.0, 0.0, 0.0]:
 			continue
@@ -357,14 +358,15 @@ def calculate_origin(frames: np.ndarray):
 	return np.mean(valid_points, axis=0)
 
 
-def parse_test(frame: np.ndarray | None, threshold: float = 0.05):
+def parse_test(frame_: tuple[float, np.ndarray] | None, threshold: float = 0.05):
 	"""Identify the highest finger on each hand."""
 	
-	if frame is None:
+	if frame_ is None:
 		return
 
-	results = {}
+	frame = frame_[1]		# frame is a tuple of (timestamp, np.ndarray)
 
+	results = {}
 
 	for hand in ["left", "right"]:
 		finger_amounts = frame[2:7, 1] if hand == "left" else frame [9:14, 1]

@@ -158,11 +158,11 @@ def train_model(
 	for phase, epoch in phase_schedule:
 		run_epoch(phase, epoch)
 		if validation_dataloader is not None:
-			# Report both component losses after every phase epoch.
+			# Report the overall loss across both components after every phase epoch.
 			validation_metrics = test_model(model, validation_dataloader, use_amp=use_amp)
 			print(
-				f"Validation -- BiGRU loss: {validation_metrics['bigru'][0]:.6f}, "
-				f"BERT loss: {validation_metrics['bert'][0]:.6f}"
+				f"Validation -- Overall loss: {validation_metrics[0]:.6f}, "
+				f"Overall accuracy: {validation_metrics[1]:.4%}"
 			)
 		if checkpoint_path is not None:
 			torch.save(model.state_dict(), checkpoint_path)
@@ -177,15 +177,13 @@ def test_model(
 	dataloader,
 	use_amp=True,
 ):
-	"""Evaluate SANCD and return loss and token accuracy for both components."""
+	"""Evaluate SANCD's final output and return token loss and accuracy."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 	model.eval()
-	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
+	loss_fn = nn.CrossEntropyLoss(ignore_index=-100, reduction="sum")
 	amp_enabled = use_amp and device.type == "cuda"
-	total_bigru_loss = 0.0
 	total_bert_loss = 0.0
-	total_bigru_correct = 0
 	total_bert_correct = 0
 	total_count = 0
 	batch_count = 0
@@ -197,15 +195,12 @@ def test_model(
 		with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
 			bigru_logits, bert_logits = model.forward_components(data)
 
-		bigru_loss = _loss_for_logits(bigru_logits, labels, loss_fn)
 		bert_loss = _loss_for_logits(bert_logits, labels, loss_fn)
-		bigru_predictions = bigru_logits.argmax(dim=-1)
 		bert_predictions = bert_logits.argmax(dim=-1)
 		valid_labels = labels.ne(-100)
 
-		total_bigru_loss += bigru_loss.item()
+		# BERT is SANCD's final decoder; BiGRU is an internal auxiliary component.
 		total_bert_loss += bert_loss.item()
-		total_bigru_correct += ((bigru_predictions == labels) & valid_labels).sum().item()
 		total_bert_correct += ((bert_predictions == labels) & valid_labels).sum().item()
 		total_count += valid_labels.sum().item()
 		batch_count += 1
@@ -213,7 +208,8 @@ def test_model(
 	if batch_count == 0:
 		raise ValueError("The dataloader must contain at least one batch.")
 
-	overall_loss = total_bert_loss / batch_count
+
+	overall_loss = total_bert_loss / total_count if total_count else 0.0
 	overall_accuracy = total_bert_correct / total_count if total_count else 0.0
 
 	return overall_loss, overall_accuracy
@@ -255,10 +251,9 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _bigru_path=N
 	torch.save(trained_model.state_dict(), save_path)
 
 	test_dataloader = DataLoader(GeometricDataset(test_path), shuffle=False, **loader_kwargs)
-	metrics = test_model(trained_model, test_dataloader)
-	for component, (loss, accuracy) in metrics.items():
-		print(f"{component.title()} Test Loss: {loss:.6f}")
-		print(f"{component.title()} Test Accuracy: {accuracy:.4%}")
+	test_loss, test_accuracy = test_model(trained_model, test_dataloader)
+	print(f"SANCD Test Loss: {test_loss:.6f}")
+	print(f"SANCD Test Accuracy: {test_accuracy:.4%}")
 
 if __name__ == "__main__":
 	main()
