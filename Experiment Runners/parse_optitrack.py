@@ -4,24 +4,16 @@ from pathlib import Path
 from typing import Any, Tuple
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Minimal dataclasses that match the repr output in out.txt.
-# The file is essentially a Python object repr, so we can safely evaluate it in
-# a controlled namespace.
-# ---------------------------------------------------------------------------
-
 @dataclass
 class MarkerSetDescription:
 	name: str
 	marker_names: Tuple[str, ...]
-
 
 @dataclass
 class RigidBodyMarkerDescription:
 	name: str
 	active_label: int
 	pos: Tuple[float, float, float]
-
 
 @dataclass
 class RigidBodyDescription:
@@ -32,13 +24,11 @@ class RigidBodyDescription:
 	quat: Any = None
 	markers: Tuple[Any, ...] = ()
 
-
 @dataclass
 class SkeletonDescription:
 	name: str
 	id_num: int
 	rigid_body_descriptions: Tuple[RigidBodyDescription, ...]
-
 
 @dataclass
 class DataDescriptions:
@@ -50,12 +40,10 @@ class DataDescriptions:
 	cameras: Tuple[Any, ...] = ()
 	assets: Tuple[Any, ...] = ()
 
-
 @dataclass
 class MarkerSet:
 	model_name: str
 	marker_pos_list: Tuple[Tuple[float, float, float], ...]
-
 
 @dataclass
 class RigidBody:
@@ -66,12 +54,10 @@ class RigidBody:
 	tracking_valid: bool = False
 	marker_error: float = 0.0
 
-
 @dataclass
 class Skeleton:
 	id_num: int
 	rigid_bodies: Tuple[RigidBody, ...]
-
 
 @dataclass
 class LabeledMarker:
@@ -81,11 +67,9 @@ class LabeledMarker:
 	param: int
 	residual: float
 
-
 @dataclass
 class FramePrefix:
 	frame_number: int
-
 
 @dataclass
 class FrameSuffix:
@@ -98,7 +82,6 @@ class FrameSuffix:
 	param: int
 	is_recording: bool
 	tracked_models_changed: bool
-
 
 @dataclass
 class DataFrame:
@@ -113,7 +96,6 @@ class DataFrame:
 	devices: Tuple[Any, ...] = ()
 	suffix: FrameSuffix = None
 
-
 # Some constructors in the file are used in the data descriptions. Keep them in the
 # eval namespace even if they are not used directly in this script.
 @dataclass
@@ -125,23 +107,16 @@ class DeviceDescription:
 	channel_data_type: int
 	channel_names: Tuple[str, ...]
 
-
 @dataclass
 class Device:
 	id_num: int
 	channel_arrays: Tuple[Tuple[float, ...], ...]
-
 
 @dataclass
 class CameraDescription:
 	name: str
 	position: Tuple[float, float, float]
 	orientation_quat: Tuple[float, float, float, float]
-
-
-# ---------------------------------------------------------------------------
-# Parser helpers
-# ---------------------------------------------------------------------------
 
 
 def eval_capture(text: str):
@@ -178,6 +153,21 @@ def load_capture(path: str | Path):
 	return description, frames
 
 
+def quaternion_to_euler(quaternion: tuple[float, float, float, float]) -> tuple[float, float, float]:
+	"""Convert an (x, y, z, w) quaternion to XYZ Euler angles in radians."""
+	x, y, z, w = np.asarray(quaternion, dtype=float)
+	norm = np.linalg.norm((x, y, z, w))
+	if norm == 0:
+		raise ValueError("Cannot convert a zero-length quaternion.")
+
+	x, y, z, w = np.asarray((x, y, z, w)) / norm
+	roll = np.arctan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
+	pitch_sin = 2.0 * (w * y - z * x)
+	pitch = np.arcsin(np.clip(pitch_sin, -1.0, 1.0))
+	yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+	return float(roll), float(pitch), float(yaw)
+
+
 def extract_wrist(description: DataDescriptions, frame: DataFrame, hand_name: str):
 	"""Map marker names to 3D positions for a single hand. (markers are the retroreflective speres)"""
 	marker_desc = next(md for md in description.marker_sets if md.name == hand_name)
@@ -195,14 +185,12 @@ def extract_wrist(description: DataDescriptions, frame: DataFrame, hand_name: st
 
 	skeleton_id = next(sd.id_num for sd in description.skeletons if sd.name == hand_name)
 	skeleton = next(s for s in frame.skeletons if s.id_num == skeleton_id)
-	# The root rigid body is the first rigid body in the skeleton; its rotation is in quaternion form.
+	# The root rigid body is the first rigid body in the skeleton.
 	root_rb = skeleton.rigid_bodies[0]
 	return {
 		"wrist_center": tuple((x + y) / 2.0 for x, y in zip(wrist_out, wrist_in)),
-		"rotation_quaternion": root_rb.rot,
-
+		"rotation_euler": quaternion_to_euler(root_rb.rot),
 	}
-	# TODO: I'll probably want to convert it to euler angles
 
 def extract_fingertips(description: DataDescriptions, frame: DataFrame, hand_name: str):
 	# The live frame sometimes remaps rigid-body IDs; the stable way to match them is by ordering.
@@ -216,15 +204,71 @@ def extract_fingertips(description: DataDescriptions, frame: DataFrame, hand_nam
 	for desc_name, rb in zip(desc_names, rb_positions):
 		suffix = desc_name.rsplit("_", 1)[-1]
 		if any(finger in suffix for finger in fingers):
-			tips[suffix] = rb.pos
+			tips[suffix] = np.asarray(rb.pos, dtype=float)
 	return tips
 
+distal_lengths = {		# NOTE: Needs to measured and calibrated for each user
+	"r_thumb": 0.035,
+	"r_index": 0.025,
+	"r_middle": 0.025,
+	"r_ring": 0.025,
+	"r_pinky": 0.020,
+	"l_thumb": 0.035,
+	"l_index": 0.025,
+	"l_middle": 0.025,
+	"l_ring": 0.025,
+	"l_pinky": 0.020,
+}
+
+def fingertip_from_bones(
+		distal_bone: RigidBody, 
+		distal_length: float,
+	) -> np.ndarray:
+	"""Estimate a fingertip by extending the distal bone past its base."""
+	distal = np.asarray(distal_bone.pos, dtype=float)
+	x, y, z, w = np.asarray(distal_bone.rot, dtype=float)
+	norm = np.linalg.norm((x, y, z, w))
+	if norm == 0:
+		raise ValueError("Cannot rotate a fingertip with a zero-length quaternion.")
+	x, y, z, w = np.asarray((x, y, z, w)) / norm
+	rotation = np.array([
+		[1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
+		[2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
+		[2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
+	])
+	return distal + rotation @ np.array([0.0, 0.0, distal_length])
+
+
+def nearest_wrist_marker(
+    root_position: np.ndarray,
+    marker_positions: tuple[tuple[float, float, float], ...],
+    max_distance: float = 0.05,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return the nearest wrist marker and its normalized wrist-to-root vector."""
+    if not marker_positions:
+        return root_position, np.zeros(3, dtype=float)
+
+    markers = np.asarray(marker_positions, dtype=float)
+    distances = np.linalg.norm(markers - root_position, axis=1)
+    nearest_index = int(np.argmin(distances))
+    if distances[nearest_index] > max_distance:
+        return root_position, np.zeros(3, dtype=float)
+
+    marker = markers[nearest_index]
+    wrist_to_root = root_position - marker
+    distance = np.linalg.norm(wrist_to_root)
+    if distance == 0:
+        return marker, np.zeros(3, dtype=float)
+    return marker, wrist_to_root / distance
+
+
 prev_skeleton_pos = np.array([])
-def frame_point_array(frame: DataFrame, description: DataDescriptions, origin: np.ndarray | None) -> np.ndarray | None:
+def frame_point_array(frame: DataFrame, description: DataDescriptions, origin: np.ndarray | None) -> tuple[float, np.ndarray | None]:
 	"""Flatten a single frame into a (14, 3) NumPy array
 
 	The canonical ordering of tracked points in the flattened frame array is:
 
+	  0		left hand wrist center
 	  1		left hand wrist rotation
 	  2-6   left_hand fingertips: Thumb, Index, Middle, Ring, Pinky
 	  7		right hand wrist center
@@ -253,15 +297,27 @@ def frame_point_array(frame: DataFrame, description: DataDescriptions, origin: n
 			root, thumb, index, middle, ring, pinky = \
 				rigid_bodies[0], rigid_bodies[3], rigid_bodies[6], \
 				rigid_bodies[9], rigid_bodies[12], rigid_bodies[15]
+			wrist_point, wrist_vector = nearest_wrist_marker(
+				np.asarray(root.pos, dtype=float),
+				frame.unlabeled_marker_pos,
+			)
 
-			# TODO: calculate pos, rotation from root + marker
-			# TODO: calculate real tips?
-			points += [root, root, thumb, index, middle, ring, pinky]
-	except (StopIteration, AttributeError, IndexError):
+			fingertips = [
+				fingertip_from_bones(
+					finger,
+					distal_lengths[f"{hand_name[0]}_{name.lower()}"],
+				)
+				for name, finger in zip(
+					("Thumb", "Index", "Middle", "Ring", "Pinky"),
+					[thumb, index, middle, ring, pinky]
+				)
+			]
+			points += [wrist_point, wrist_vector, *fingertips]
+	except Exception as e:
+		print(f"Error processing frame {frame.prefix.frame_number}: {e}")
 		return None
 
-	points = list(map(lambda l: l.pos, points))
-	arr = np.asarray(points, dtype=float)
+	arr = np.asarray([p.pos for p in points], dtype=float)
 
 	# The manus gloves only update at 90hz, compared to the 240hz of the cameras, so some frames are repeated
 	# skip those as they give no useful information
@@ -271,10 +327,10 @@ def frame_point_array(frame: DataFrame, description: DataDescriptions, origin: n
 	prev_skeleton_pos = arr
 	
 	if origin is not None:
-		arr = arr - origin
+		position_indices = [0, *range(2, 7), 7, *range(9, 14)]
+		arr[position_indices] -= origin
 
-	# TODO: Also return timestamp (frame.suffix.timestamp)
-	return arr
+	return (frame.suffix.timestamp, arr)
 
 def calculate_origin(frames: np.ndarray):
 	"""Use the midpoint of both the wrist markers from at least 10 valid frames as the zero-point."""
@@ -283,26 +339,22 @@ def calculate_origin(frames: np.ndarray):
 		print(f"not enough frames to calibrate origin: {len(frames)}/10")
 		return None
 
-	means = []
-	for current_hand in ["left_hand", "right_hand"]:
-		valid_points = []
 
-		for frame in frames:
+	valid_points = []
 
-			valid_points.append(frame[0])
-			valid_points.append(frame[7])
-
-		if len(valid_points) < 10:
-			# print(f"not enough valid points: {len(valid_points)}/{len(frames)}")
+	for frame in frames:
+		# If the wrist direction vector is 0 the marker is not being tracked, so we should skip that frame
+		if frame[1] == [0.0, 0.0, 0.0] or frame[8] == [0.0, 0.0, 0.0]:
 			continue
 
-		wrist_mean = np.mean(np.stack(valid_points), axis=0)
-		means.append(wrist_mean)
+		valid_points.append(frame[0])
+		valid_points.append(frame[7])
 
-	if len(means) != 2:
-		print("At least one hand not tracking correctly")
+	if len(valid_points) < 20:
+		# print(f"not enough valid points: {len(valid_points)}/{len(frames)}")
 		return None
-	return np.mean(np.stack(means), axis=0)
+
+	return np.mean(valid_points, axis=0)
 
 
 def parse_test(frame: np.ndarray | None, threshold: float = 0.05):
@@ -326,5 +378,3 @@ def parse_test(frame: np.ndarray | None, threshold: float = 0.05):
 					"amount": round(float(finger_amounts[best_finger]), 4)}
 
 	return results
-
- # TODO: calibration - https://docs.optitrack.com/quick-start-guides/quick-start-guide-precision-capture#refine-rigid-body-definition

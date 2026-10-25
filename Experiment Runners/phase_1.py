@@ -156,3 +156,5 @@ if __name__ == "__main__":
 			"Success usually comes to those who are too busy to be looking for it",
 			"You know you're in love when you can't fall asleep because reality is finally better than your dreams" ],
 			0.01).run()
+
+# TODO: undo

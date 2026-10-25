@@ -39,7 +39,7 @@ def main():
 	if phase == 1:
 		recv, send = mp.Pipe(duplex=False)
 		recorder = OptiTrackRecorder(recv)
-		phase1 = Phase1(send, participant_dir, quotes, 0.5)
+		phase1 = Phase1(send, participant_dir, quotes)
 
 		recorder_process = mp.Process(target=recorder.start_server)
 		phase_process = mp.Process(target=phase1.run)

@@ -120,6 +120,3 @@ if __name__ == "__main__":
 	
 
 # NOTE: The marker positions of rigid bodies are only transmitted correctly if "Y-up" is selected in the streaming pane. If "Z-up" is selected, the frame of the rigid bodies is rotated but the marker positions are not, resulting in wrong positions of the markers relative to the rigid body.
-
-
-# TODO: Actually capture wrist angles
