@@ -1,5 +1,4 @@
 from __future__ import annotations
-import pprint
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Tuple
@@ -213,65 +212,68 @@ def extract_fingertips(description: DataDescriptions, frame: DataFrame, hand_nam
 	rb_positions = frame_skeleton.rigid_bodies
 
 	tips = {}
-	fingers = ("Thumb", "IndeX", "Middle", "Ring", "Pinky")
+	fingers = ("Thumb", "Index", "Middle", "Ring", "Pinky")
 	for desc_name, rb in zip(desc_names, rb_positions):
 		suffix = desc_name.rsplit("_", 1)[-1]
 		if any(finger in suffix for finger in fingers):
 			tips[suffix] = rb.pos
 	return tips
 
-
-def frame_point_array(frame: DataFrame, description: DataDescriptions, origin: np.ndarray | None=None) -> np.ndarray:
+prev_skeleton_pos = np.array([])
+def frame_point_array(frame: DataFrame, description: DataDescriptions, origin: np.ndarray | None) -> np.ndarray | None:
 	"""Flatten a single frame into a (14, 3) NumPy array
 
 	The canonical ordering of tracked points in the flattened frame array is:
-	  0		left hand wrist center
+
 	  1		left hand wrist rotation
-	  2-6   left_hand fingertips: LeftHandThumb3, LeftHandIndex3, LeftHandMiddle3, LeftHandRing3, LeftHandPinky3
+	  2-6   left_hand fingertips: Thumb, Index, Middle, Ring, Pinky
 	  7		right hand wrist center
 	  8		right hand wrist rotation
-	  9-13	right_hand fingertips: RightHandThumb3, RightHandIndex3, RightHandMiddle3, RightHandRing3, RightHandPinky3
+	  9-13  right_hand fingertips: Thumb, Index, Middle, Ring, Pinky
 	"""
 	if description is None:
 		raise ValueError("A DataDescriptions object is required to resolve point names for a frame.")
 
-	if frame.skeletons:
-		print("".join(list(map(lambda l: f"{l.pos[0]:< 5.5f}\t", frame.skeletons[0].rigid_bodies))), sep='')
+	try:
+		frame_skeletons = {skeleton.id_num: skeleton for skeleton in frame.skeletons}
+		points = []
 
-	points = []
+		for hand_name in ("left_hand", "right_hand"):
+			description_skeleton = next(
+				skeleton for skeleton in description.skeletons
+				if skeleton.name == hand_name
+			)
+			hand = frame_skeletons.get(description_skeleton.id_num)
+			if hand is None or len(hand.rigid_bodies) <= 15:
+				return None
+			if not hand.rigid_bodies[0].tracking_valid:
+				return None
 
-	for hand_name in ("left_hand", "right_hand"):
-		try:			
-			wrist_values = extract_wrist(description, frame, hand_name)
-			fingertip_values = extract_fingertips(description, frame, hand_name)
-			values = wrist_values | fingertip_values
+			rigid_bodies = hand.rigid_bodies
+			root, thumb, index, middle, ring, pinky = \
+				rigid_bodies[0], rigid_bodies[3], rigid_bodies[6], \
+				rigid_bodies[9], rigid_bodies[12], rigid_bodies[15]
 
-			for value in [
-				'wrist_center',
-				'wrist_rotation',
-				'thumb',
-				'index',
-				'middle',
-				'ring',
-				'little']:
-				
-				if value in values:
-					points.append(values[value])
-				else:
-					points.append(np.zeros(3, dtype=float))
+			# TODO: calculate pos, rotation from root + marker
+			# TODO: calculate real tips?
+			points += [root, root, thumb, index, middle, ring, pinky]
+	except (StopIteration, AttributeError, IndexError):
+		return None
 
-		except Exception as e:
-			continue
-
+	points = list(map(lambda l: l.pos, points))
 	arr = np.asarray(points, dtype=float)
+
+	# The manus gloves only update at 90hz, compared to the 240hz of the cameras, so some frames are repeated
+	# skip those as they give no useful information
+	global prev_skeleton_pos
+	if np.array_equal(prev_skeleton_pos, arr):
+		return None
+	prev_skeleton_pos = arr
 	
-	# TODO: I don't know which points are missing
-	# TODO: detect missing frames, this may do enough though
-
-
 	if origin is not None:
 		arr = arr - origin
 
+	# TODO: Also return timestamp (frame.suffix.timestamp)
 	return arr
 
 def calculate_origin(frames: np.ndarray):
@@ -303,20 +305,26 @@ def calculate_origin(frames: np.ndarray):
 	return np.mean(np.stack(means), axis=0)
 
 
-def parse_test(frame: np.ndarray, threshold: float = 0.0):
+def parse_test(frame: np.ndarray | None, threshold: float = 0.05):
 	"""Identify the highest finger on each hand."""
 	
+	if frame is None:
+		return
+
 	results = {}
 
 
 	for hand in ["left", "right"]:
 		finger_amounts = frame[2:7, 1] if hand == "left" else frame [9:14, 1]
+		finger_amounts = finger_amounts - np.min(finger_amounts)
 		
 		best_finger = np.argmax(finger_amounts)
 		if float(finger_amounts[best_finger]) < threshold:
 			results[hand] = "None"
 		else:
 			results[hand] = {"finger": ['thumb', 'index', 'middle', 'ring', 'little'][best_finger],
-			                 "amount": finger_amounts[best_finger]}
+					"amount": round(float(finger_amounts[best_finger]), 4)}
 
 	return results
+
+ # TODO: calibration - https://docs.optitrack.com/quick-start-guides/quick-start-guide-precision-capture#refine-rigid-body-definition

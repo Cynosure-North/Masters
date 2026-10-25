@@ -23,14 +23,14 @@ class Phase1:
 		if self.current_folder is None:
 			raise RuntimeError("No active folder selected before starting a recording.")
 		if self.pipe is not None:
-			self.pipe.put("start")
+			self.pipe.send("start")
 
 	def _finish_recording(self, filename: str) -> None:
 		if self.current_folder is None:
 			raise RuntimeError("No active folder selected before finishing a recording.")
 		filepath = self.current_folder / filename
 		if self.pipe is not None:
-			self.pipe.put(filepath)
+			self.pipe.send(filepath)
 
 	def run(self) -> None:
 
@@ -85,7 +85,7 @@ class Phase1:
 
 			print(f"\nExperiment completed. Files saved under: {self.root_dir}")
 			if self.pipe is not None:
-				self.pipe.put("stop")
+				self.pipe.send("stop")
 
 			label.config(text="Experiment completed\n\nThank you for participating",
 			             highlightbackground="red", highlightthickness=20)

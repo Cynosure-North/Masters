@@ -29,9 +29,9 @@ def consent(participant_dir):
 
 def main():
 	phase = 1
-	parent = Path(r"C:\Users\mno64\Thesis\Mocap Data\phase" + str(phase))
+	parent = Path(Path(__file__).parent.parent / "Mocap Data" / f"phase{phase}")
 	participant_dir = make_session_directory(parent)
-	with open(r"C:\Users\mno64\Thesis\Experiment Runners\data\phrases.txt") as f:
+	with open(Path(__file__).parent / "data" / "phrases.txt") as f:
 		quotes = f.read().splitlines()
 
 	consent(participant_dir)
@@ -39,12 +39,25 @@ def main():
 	if phase == 1:
 		recv, send = mp.Pipe(duplex=False)
 		recorder = OptiTrackRecorder(recv)
-		phase1 = Phase1(send, participant_dir, quotes)
-		
-		mp.Process(target=recorder.start_server).start()
-		mp.Process(target=phase1.run).start()
+		phase1 = Phase1(send, participant_dir, quotes, 0.5)
 
-		record_interview()
+		recorder_process = mp.Process(target=recorder.start_server)
+		phase_process = mp.Process(target=phase1.run)
+		recorder_process.start()
+		phase_process.start()
+
+		try:
+			record_interview(participant_dir)
+		finally:
+			send.send("stop")
+			recorder_process.join(2)
+			if recorder_process.is_alive():
+				recorder_process.terminate()
+				recorder_process.join()
+
+			if phase_process.is_alive():
+				phase_process.terminate()
+				phase_process.join()
 		
 if __name__ == "__main__":
 	main()

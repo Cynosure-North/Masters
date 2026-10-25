@@ -1,3 +1,4 @@
+from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
 
@@ -119,7 +120,7 @@ def main() -> tuple[bool, bool] | None:
 	ttk.Label(contact_details, text="Phone: +64 3 369 2226 (HIT Lab NZ phone number)", style="Footer.TLabel").pack(anchor="w")
 	ttk.Label(contact_details, text="HREC Ref: HREC 2026/55/LR", style="Footer.TLabel").pack(side="left")
 
-	image = tk.PhotoImage(file=r"C:\Users\mno64\Thesis\Experiment Runners\uc_logo_smaller.png")
+	image = tk.PhotoImage(file=Path(__file__).parent / "uc_logo_smaller.png")
 	photo = tk.Label(
 		contact_footer,
 		image=image,
