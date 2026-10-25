@@ -26,6 +26,8 @@ class Phase1:
 			self.pipe.put("start")
 
 	def _finish_recording(self, filename: str) -> None:
+		if self.current_folder is None:
+			raise RuntimeError("No active folder selected before finishing a recording.")
 		filepath = self.current_folder / filename
 		if self.pipe is not None:
 			self.pipe.put(filepath)
@@ -46,10 +48,10 @@ class Phase1:
 
 				waiting_to_start = True
 				if step == "calibration":
-					label.config(text=f"Change surface to {folder}\npress Enter when you're ready\n({(stage_index+2)//2}/{len(stages)//2})",
+					label.config(text=f"Change surface to {folder}\npress the left pedal button when you're ready\n({(stage_index+2)//2}/{len(stages)//2})",
 					             highlightbackground="red", highlightthickness=20)
 				else:
-					label.config(text="Type the following quotes\npress Enter when you're ready",
+					label.config(text="Type the following quotes\npress the left pedal button when you're ready",
 					             highlightbackground="red", highlightthickness=20)
 
 
@@ -77,9 +79,9 @@ class Phase1:
 				label.config(text=current_quote, highlightthickness=0)
 
 		def end_of_experiment():
-			window.bind("<space>", on_space)
-			window.bind("<Return>", on_enter)
-			window.bind("<F13>", on_f13)
+			window.unbind("<F13>")
+			window.unbind("<F15>")
+			window.unbind("<F14>")
 
 			print(f"\nExperiment completed. Files saved under: {self.root_dir}")
 			if self.pipe is not None:
@@ -89,7 +91,7 @@ class Phase1:
 			             highlightbackground="red", highlightthickness=20)
 			window.after(15_000, window.destroy)
 
-		def on_enter(_event: tk.Event) -> None:
+		def on_left_pedal_button(_event: tk.Event) -> None:
 			nonlocal waiting_to_start, stage_index, end_time, calibration_count
 			print(f"step: {step}")
 			if step == "calibration" and calibration_count == 0:
@@ -98,8 +100,13 @@ class Phase1:
 				end_time = dt.datetime.now() + dt.timedelta(seconds=self.duration_seconds)
 				next_quote()
 
-		def on_space(_event: tk.Event) -> None:
-			nonlocal calibration_count, current_quote
+		def on_middle_pedal_button(_event: tk.Event) -> None:
+			nonlocal calibration_count, current_quote, step, middle_pedal_count
+
+			# the middle pedal triggers twice per press
+			middle_pedal_count += 1
+			if middle_pedal_count % 2 == 1:
+				return
 
 			if step == "calibration" and calibration_count != 0:
 				self._finish_recording(f"calibration_{calibration_count-1}")
@@ -108,7 +115,7 @@ class Phase1:
 				self._finish_recording(current_quote)
 				next_quote()
 
-		def on_f13(_event: tk.Event) -> None:
+		def on_right_pedal_button(_event: tk.Event) -> None:
 			nonlocal current_quote
 
 			if step == "typing" and current_quote is not None:
@@ -128,15 +135,16 @@ class Phase1:
 		current_quote = None
 		end_time = None
 		waiting_to_start = True
+		middle_pedal_count = 0
 
 		window = tk.Tk()
 		window.attributes('-fullscreen', True)
 		label = tk.Label(window, text="", font=("Helvetica", 64, "bold"), wraplength=1500)
 		label.pack(expand=True)
 
-		window.bind("<space>", on_space)
-		window.bind("<Return>", on_enter)
-		window.bind("<F13>", on_f13)
+		window.bind("<F13>", on_middle_pedal_button)
+		window.bind("<F15>", on_left_pedal_button)
+		window.bind("<F14>", on_right_pedal_button)
 
 		next_stage()
 		window.mainloop()
