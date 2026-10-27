@@ -16,11 +16,8 @@ class OptiTrackRecorder:
 		self.rejected_frames = 0
 		self.data_description = None
 		self.calibrated_origin = None
-
 		self._state_lock = None
-
 		self.test = False
-		self.last_test_time = 0.0
 
 		self.streaming_client = NatNetClient(server_ip_address="127.0.0.1", local_ip_address="127.0.0.1", use_multicast=False)
 		self.streaming_client.on_data_frame_received_event.handlers.append(self.receive_new_frame)
@@ -76,19 +73,6 @@ class OptiTrackRecorder:
 			self.data_description = data_desc
 
 	def receive_new_frame(self, data_frame: DataFrame):
-		# print(
-		# 	data_frame.prefix.frame_number,
-		# 	[
-		# 		(
-		# 			skeleton.id_num,
-		# 			skeleton.rigid_bodies[0].pos,
-		# 			skeleton.rigid_bodies[0].rot,
-		# 			skeleton.rigid_bodies[0].tracking_valid,
-		# 		)
-		# 		for skeleton in data_frame.skeletons
-		# 	],
-		# )
-
 		with self._state_lock:
 			self.received_frames += 1
 			if self.data_description is None:
@@ -106,10 +90,6 @@ class OptiTrackRecorder:
 						self.frames = list(map(lambda l: (l[0], l[1] - self.calibrated_origin), self.frames))
 
 				if self.test:
-					# now = time.monotonic()
-					# if now - self.last_test_time < 2.0:
-					# 	return
-					# self.last_test_time = now
 					print(parse_test(frame))
 			else:
 				self.rejected_frames += 1
