@@ -7,6 +7,8 @@ from consent import main as consent_screen
 from phase_1 import Phase1
 from interview import main as record_interview
 
+PHASE = 1
+
 def make_session_directory(parent: Path) -> Path:
 	"""Create a UUID-named root directory and the four required condition folders."""
 	run_root = parent / f"session_{uuid.uuid4().hex[:8]}"
@@ -28,7 +30,6 @@ def consent(participant_dir):
 		(participant_dir / "no_quotes").touch()
 
 def main():
-	phase = 1
 	parent = Path(Path(__file__).parent.parent / "Mocap Data" / f"phase{phase}")
 	participant_dir = make_session_directory(parent)
 	with open(Path(__file__).parent / "data" / "phrases.txt") as f:
@@ -36,7 +37,7 @@ def main():
 
 	consent(participant_dir)
 
-	if phase == 1:
+	if PHASE == 1:
 		recv, send = mp.Pipe(duplex=False)
 		recorder = OptiTrackRecorder(recv)
 		phase1 = Phase1(send, participant_dir, quotes)
