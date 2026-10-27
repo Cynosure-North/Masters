@@ -40,8 +40,10 @@ class OptiTrackRecorder:
 
 				if message == "start":	# Start recording
 					self.recording = True
-				if message == "stop":	# End session
+				elif message == "stop":	# End session
 					break
+				elif message == "folder":	# recalibrate for new folder
+					self.calibrated_origin == None
 				else:	# End recording
 					with open(Path(message), 'w') as file:
 						file.write(str(self.frames))

@@ -33,7 +33,7 @@ class Phase1:
 	def run(self) -> None:
 
 		def next_stage():
-			nonlocal stage_index, waiting_to_start, step, stages
+			nonlocal stage_index, step, stages
 
 			stage_index += 1
 			if stage_index >= len(stages):
@@ -44,7 +44,6 @@ class Phase1:
 				print(f"Folder: {folder}, Step: {step}")
 				self._set_current_folder(self.root_dir / folder)
 
-				waiting_to_start = True
 				if step == "calibration":
 					label.config(text=f"Change surface to {folder}\npress Enter when you're ready\n({(stage_index+2)//2}/{len(stages)//2})",
 					             highlightbackground="red", highlightthickness=20)
@@ -90,9 +89,11 @@ class Phase1:
 			window.after(15_000, window.destroy)
 
 		def on_enter(_event: tk.Event) -> None:
-			nonlocal waiting_to_start, stage_index, end_time, calibration_count
+			nonlocal stage_index, end_time, calibration_count
 			print(f"step: {step}")
 			if step == "calibration" and calibration_count == 0:
+				if self.pipe:
+					self.pipe.put("folder")	# trigger recalibration
 				next_calibration()
 			elif step == "typing" and end_time is None:
 				end_time = dt.datetime.now() + dt.timedelta(seconds=self.duration_seconds)
@@ -115,7 +116,7 @@ class Phase1:
 				self._finish_recording(current_quote + "_typo")
 				next_quote()
 
-		folder_names = ["hard-flat", "hard-curved", "soft-flat", "soft-curved"]
+		folder_names = ["table", "pipe", "cushion", "legs"]
 		random.shuffle(folder_names)
 		with open(self.root_dir / "surface_order", 'w') as f:
 			f.write(str(folder_names))
@@ -127,7 +128,6 @@ class Phase1:
 		calibration_count = 0
 		current_quote = None
 		end_time = None
-		waiting_to_start = True
 
 		window = tk.Tk()
 		window.attributes('-fullscreen', True)
