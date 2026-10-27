@@ -20,9 +20,10 @@ class MotionDataset(torch.utils.data.Dataset):
 		if not self.path.exists():
 			raise FileNotFoundError(f"Motion dataset not found: {self.path}")
 
-		self.files = sorted(self.path.glob("*.csv")) if self.path.is_dir() else None
-		if self.files is None:
+		if (files := sorted(self.path.glob("*.csv")) if self.path.is_dir() else None) is None:
 			raise ValueError(f"Motion dataset directory is empty: {self.path}")
+		else:
+			self.files = files
 
 	def __len__(self):
 		return len(self.files)
@@ -114,8 +115,8 @@ class CommonCrawlNewsStream:
 
 	@staticmethod
 	def _configure_http_session(session):
-		from requests.adapters import HTTPAdapter
-		from urllib3.util.retry import Retry
+		from requests.adapters import HTTPAdapter # pyright: ignore[reportMissingImports, reportMissingModuleSource]
+		from urllib3.util.retry import Retry # pyright: ignore[reportMissingImports]
 
 		retry = Retry(
 			total=5,
@@ -135,7 +136,7 @@ class CommonCrawlNewsStream:
 		if self._warc_paths is not None and not refresh:
 			return self._warc_paths
 
-		import requests
+		import requests # pyright: ignore[reportMissingModuleSource]
 
 		paths = []
 		with requests.Session() as session:
@@ -191,7 +192,7 @@ class CommonCrawlNewsStream:
 		if max_documents is not None and max_documents < 1:
 			return
 
-		import requests
+		import requests # pyright: ignore[reportMissingModuleSource]
 
 		documents_yielded = 0
 		cycle = 0
@@ -440,4 +441,4 @@ def preprocess(path):
 	# TODO: preprocess for motion
 
 if __name__ == "__main__":
-	preprocess()
+	preprocess(None)

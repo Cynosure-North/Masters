@@ -34,7 +34,7 @@ class CharTokenizer:
 		ids = [self.cls_token_id]
 		for char in text:
 			if char in self.vocab:
-				ids.append(self.char2idx.get(char))		# Siletly ignore/remove extra characters (I won't need to predict their existence)
+				ids.append(self.char2idx[char])
 		ids.append(self.sep_token_id)
 		return ids
 
@@ -224,6 +224,14 @@ class LengthBucketBatchSampler(BatchSampler):
 def _mlm_loss(logits, labels, loss_fn):
 	return loss_fn(logits.reshape(-1, logits.size(-1)), labels.reshape(-1))
 
+def _is_triton_missing(error):
+	"""Return whether an error is the optional Triton compiler failure."""
+	error_type = type(error)
+	return (
+		error_type.__name__ == "TritonMissing"
+		and error_type.__module__ == "torch._inductor.exc"
+	)
+
 def train_model(
 	model,
 	dataloader,
@@ -246,7 +254,7 @@ def train_model(
 	if use_compile and hasattr(torch, "compile"):
 		compiled_model = model
 		model = torch.compile(model, dynamic=True)
-	optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, fused=(device.type == "cuda"))
+	optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4, fused=(device.type == "cuda"))
 	loss_fn = loss_fn or nn.CrossEntropyLoss(ignore_index=-100)
 	amp_enabled = use_amp and device.type == "cuda"
 	scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
@@ -274,9 +282,9 @@ def train_model(
 				with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
 					logits = model(masked_input_ids, padding_mask=padding_mask)
 					loss = _mlm_loss(logits, labels, loss_fn)
-			except torch._inductor.exc.TritonMissing:
-				if compiled_model is None:
-					raise
+			except RuntimeError as e:
+				if compiled_model is None or not _is_triton_missing(e):
+					raise e
 				print("torch.compile is unavailable; continuing with eager execution")
 				model = compiled_model
 				compiled_model = None
@@ -348,13 +356,13 @@ def test_model(
 		labels, masked_input_ids = create_mlm_inputs(
 			input_ids,
 			tokenizer,
-			mask_prob,
-			mask_generator)
+			mask_generator,
+			mask_prob)
 		try:
 			with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
 				logits = model(masked_input_ids, padding_mask=padding_mask)
-		except torch._inductor.exc.TritonMissing:
-			if compiled_model is None:
+		except RuntimeError as error:
+			if compiled_model is None or not _is_triton_missing(error):
 				raise
 			print("torch.compile is unavailable; continuing with eager evaluation")
 			model = compiled_model

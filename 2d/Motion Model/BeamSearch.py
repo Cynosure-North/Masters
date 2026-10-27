@@ -14,7 +14,8 @@ import TCN
 import ref_beamsearch
 
 
-alphabet = chars + '-'	# CTC blank (last column)
+
+alphabet = chars + ['-']	# CTC blank (last column)
 char_to_index = {character: index for index, character in enumerate(alphabet)}
 
 
@@ -333,7 +334,7 @@ def greedy_decoder(ctc):
 
 def _load_sentence_named_ctc(test_dir):
 	"""Load filename-labeled wav2vec CTC arrays in the decoder's alphabet order."""
-	import torchaudio
+	import torchaudio # pyright: ignore[reportMissingImports]
 
 	test_dir = Path(test_dir)
 	if not test_dir.is_dir():

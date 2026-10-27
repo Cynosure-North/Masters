@@ -138,3 +138,5 @@ def instantiate_model(model_path=None, *, device=None, quantize=False):
 		)
 	model.eval()
 	return model
+
+# TODO: Pick one

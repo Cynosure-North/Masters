@@ -68,7 +68,7 @@ class BPETokenizer:
 		if self.tokenizer is None:
 			raise RuntimeError("Train or load the tokenizer before encoding text")
 		token_ids = self.tokenizer.encode(self.filter_text(text)).ids
-		if add_bos:
+		if add_bos and self.BOS_ID is not None:
 			token_ids.insert(0, self.BOS_ID)
 		return token_ids
 
@@ -117,7 +117,6 @@ class SmallTwoTransformerLM(nn.Module):
 		config = GPT2Config(
 			vocab_size=tokenizer.vocab_size,
 			n_positions=block_size,
-			n_ctx=block_size,
 			n_layer=n_layer,
 			n_head=n_head,
 			n_embd=n_embd,
@@ -193,7 +192,7 @@ class SmallTwoTransformerLM(nn.Module):
 				compile_backend = "inductor"
 				if self.device.type == "cuda":
 					try:
-						import triton  # noqa: F401
+						import triton # pyright: ignore[reportMissingImports]
 					except ImportError:
 						compile_backend = "aot_eager"
 						print(

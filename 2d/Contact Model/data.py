@@ -122,16 +122,13 @@ class MaskedDataset(torch.utils.data.Dataset):
 		np.save(self.offsets_path, np.asarray(offsets, dtype=np.int64))
 		np.save(self.signature_path, np.asarray([self.vocab_size], dtype=np.int64))
 
-	def _ensure_tokens_open(self):
-		if self._tokens is None:
-			self._tokens = np.memmap(self.tokens_path, mode="r", dtype=np.uint8)
-
 	def __len__(self):
 		return len(self._offsets) - 1
 
 	def __getitem__(self, idx):
 		# Open the memory map lazily; this is important when DataLoader creates workers.
-		self._ensure_tokens_open()
+		if self._tokens is None:
+			self._tokens = np.memmap(self.tokens_path, mode="r", dtype=np.uint8)
 		start, end = self._offsets[idx], self._offsets[idx + 1]
 		sequence = np.array(self._tokens[start:end], dtype=np.uint8, copy=True)
 		if sequence.size and int(sequence.max()) >= self.vocab_size:
