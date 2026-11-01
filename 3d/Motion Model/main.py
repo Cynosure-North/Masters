@@ -1,0 +1,1 @@
+# I'll need to increase the number of parameters to the TCN, and probably increase the number of neurons/layers to handle it, the rest can stay the same

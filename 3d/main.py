@@ -29,7 +29,9 @@ def calibration(frames):
 	shape_fit = fit_surface(frames[70+end_index+10:])
 	
 	return shape_fit, compressibility
-		
+	# TODO: This is going to need a lot of work, Some participants are just squeezing for the cushion, and on the pipe and table it's much closer to sliding.
+	# Perhaps a factor could be if there's a clear peak in compression rather than a continuous increase in distance from the reference point
+	
 finger_idxs = {
 	"l_little": 2,
 	"l_ring": 3,
@@ -42,13 +44,12 @@ finger_idxs = {
 	"r_ring": 11,
 	"r_little": 12}
 
-def _unwrap_adjustment(self, frame, finger):
+def _unwrap_adjustment(self, frame, finger, compressibility):
 	""" return [uv, normal, principal curvatures]"""
 	point = frame[finger_idxs[finger]]
 	u, v = surface_uv(point, surface)
-	normal = surface_normal(point, surface)
 	normal, tangent_u, tangent_v, curvature_0, curvature_1 = principal_curvatures_frame(point, surface)
-	return np.concatenate((u, v, normal, tangent_u, tangent_v, curvature_0, curvature_1))
+	return np.concatenate((u, v, normal, tangent_u, tangent_v, curvature_0, curvature_1, compressibility))
 
 def _SDF_adjustment(frame, left_hand, right_hand):
 	""" for each finger, in each frame report the displacement from that finger to the surface of the corresponding model """
@@ -56,7 +57,7 @@ def _SDF_adjustment(frame, left_hand, right_hand):
 	adjustments = np.zeros((54, 3), dtype=np.float32)
 	for idx, point in enumerate(frame):
 		hand = left_hand if idx < 27 else right_hand
-		adjustments[idx] = signed_distance_to_surface(point, hand.shape)
+		adjustments[idx] = [signed_distance_to_surface(point, hand.shape), hand.compressibility]
 	return np.concatenate((frame,adjustments), axis=-1)
 	
 class Surface():
@@ -91,7 +92,8 @@ class ContactModeller():
 			elif len(val) > 1:
 				raise ValueError("Only one contact point per frame")
 			else:
-				res.append(self._unwrap_adjustment(self.frames[idx], val[0]))
+				hand = self.left_hand if val[0][0] = 'l' else self.right_hand
+				res.append(self._unwrap_adjustment(self.frames[idx], val[0], hand.compressibility))
 			.
 		return result
 
