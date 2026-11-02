@@ -268,3 +268,5 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 
 if __name__ == "__main__":
 	main()
+	
+# For the 3d version I should test if I can just use the UV coordinates

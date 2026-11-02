@@ -244,3 +244,7 @@ if __name__ == "__main__":
 	main()
 
 # TODO: TCN is cooked, perhaps because I'm not using the full keyboard? IDK needs more testing
+
+# For 3d I'll need to increase the number of parameters to the TCN, and probably increase the number of neurons/layers to handle it, the rest can stay the same
+#
+# Although it could also be good to test it with only the motion data and none of the surface data

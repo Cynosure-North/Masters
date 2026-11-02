@@ -169,3 +169,5 @@ class InteractiveContactModeller():
 	
 	def motion_transform(self, frame):
 		_SDF_adjustment(frame, self.left_hand, self.right_hand)
+		
+# NOTE: There are 3 files with 3d adjustments: MLP, BiGRU, and TCN (pose model, contact model, and motion model respectively)

@@ -1,1 +1,0 @@
-# I'll probably want to increase the number of neurons/layers compared to the 2d one

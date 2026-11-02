@@ -20,15 +20,17 @@ from data import PoseDataset, finger_list, finger_to_keys
 
 
 class Inidiv_PoseMLP(nn.Module):
-	def __init__(self, *, inputs=25, neurons=60, outputs=9):
+	def __init__(self, *, inputs=25, neurons=60, outputs=9, layers=1):
 		super().__init__()
 		self.outputs = outputs
 
-		self.network = nn.Sequential(
-			nn.Linear(inputs, neurons),
-			nn.Sigmoid(),
-			nn.Linear(neurons, outputs),
-		)
+		network = nn.Sequential(nn.Linear(inputs, neurons))
+		for n in range(layers-1):
+			network.append(nn.LeakyReLU())
+			network.append(nn.Linear(neurons, neurons)
+		network.append(nn.LeakyReLU())
+		network.append(nn.Linear(neurons, outputs))
+		self.network = network
 
 	def forward(self, inputs):
 		if self.outputs == 0:
@@ -36,13 +38,13 @@ class Inidiv_PoseMLP(nn.Module):
 		return self.network(inputs)
 
 class PoseMLP(nn.Module):
-	def __init__(self, models=None, *, inputs=25, neurons=60):
+	def __init__(self, models=None, *, inputs=25, neurons=60, layers=1):
 		super().__init__()
 
 		self.models = nn.ModuleDict()
 		if models is None:
 			models = {
-				key: Inidiv_PoseMLP(inputs=inputs, neurons=neurons, outputs=len(value))
+				key: Inidiv_PoseMLP(inputs=inputs, neurons=neurons, outputs=len(value), layers=layers)
 				for key, value in finger_to_keys.items()
 			}
 		self.models.update(models)
@@ -215,3 +217,10 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 
 if __name__ == "__main__":
 	main()
+
+# https://karpathy.github.io/2019/04/25/recipe/
+#
+# I'll probably want to increase the number of neurons/layers compared to the 2d one
+# I can test and see how it goes
+# 
+# NOTE: I don't need a separate 3d implementation for this model
