@@ -1,0 +1,1 @@
+# I can use one of the pedal buttons as backspace (probably the middle one)
