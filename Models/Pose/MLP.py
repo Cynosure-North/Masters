@@ -18,6 +18,7 @@ from torch.utils.data import DataLoader
 from pathlib import Path
 from data import PoseDataset, finger_list, finger_to_keys
 
+THREE_DIMENSIOINS=False
 
 class Inidiv_PoseMLP(nn.Module):
 	def __init__(self, *, inputs=25, neurons=60, outputs=9, layers=1):
@@ -187,9 +188,14 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	train_path = _train_path or data_dir / "train.csv"
 	validation_path = _validation_path or data_dir / "validation.csv"
 	test_path = _test_path or data_dir / "test.csv"
-	save_path = _save_path or project_dir / "trained" / "best_MLP.pth"
 
-	model = PoseMLP()
+	if not THREE_DIMENSIOINS:
+		model = PoseMLP()
+		save_path = _save_path or project_dir / "trained" / "best_MLP.pth"
+	else:
+		model = PoseMLP(layers=2)
+		save_path = _save_path or project_dir / "trained" / "best_MLP_3d.pth"
+		# TODO: I'll need separate dataloaders for 3d
 
 	if save_path.exists():
 		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))
@@ -222,5 +228,3 @@ if __name__ == "__main__":
 #
 # I'll probably want to increase the number of neurons/layers compared to the 2d one
 # I can test and see how it goes
-# 
-# NOTE: I don't need a separate 3d implementation for this model

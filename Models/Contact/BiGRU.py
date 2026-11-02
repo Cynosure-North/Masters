@@ -6,6 +6,7 @@ from pathlib import Path
 from data import chars, pad_variable, GeometricDataset
 
 SEED = 0
+THREE_DIMENSIOINS = False
 
 def augment_coordinates(data, generator, *, jitter_pixels=3.0, noise_std=0.01, p=0.5):
 	"""Apply coordinate jitter and gaussian noise"""
@@ -231,13 +232,19 @@ def test_model(
 
 def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=None):
 	project_dir = Path(__file__).resolve().parent
-	save_path = _save_path or project_dir / "trained" / "best_BiGRU.pth"
 	data_dir = project_dir / "data" / "geometric"
 	train_path = _train_path or data_dir / "train.csv"
 	validation_path = _validation_path or data_dir / "validation.csv"
 	test_path = _test_path or data_dir / "test.csv"
 
-	model = BiGRU()
+	if not THREE_DIMENSIOINS:
+		model = BiGRU()
+		save_path = _save_path or project_dir / "trained" / "best_BiGRU.pth"
+	else:
+		# Also has [uv, normal, principal curvatures, compressibility]
+		# FIXME: maybe adding an extra layer to the 3d contact model will help. We will see
+		model = BiGRU(input_size=16, num_layers=3)
+		save_path = _save_path or project_dir / "trained" / "best_BiGRU_3d.pth"
 
 	if save_path.exists():
 		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))

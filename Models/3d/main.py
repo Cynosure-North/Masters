@@ -45,14 +45,15 @@ finger_idxs = {
 	"r_little": 12}
 
 def _unwrap_adjustment(self, frame, finger, compressibility):
-	""" return [uv, normal, principal curvatures]"""
+	""" return [uv, normal, principal curvatures, compressabiliy]"""
 	point = frame[finger_idxs[finger]]
 	u, v = surface_uv(point, surface)
 	normal, tangent_u, tangent_v, curvature_0, curvature_1 = principal_curvatures_frame(point, surface)
 	return np.concatenate((u, v, normal, tangent_u, tangent_v, curvature_0, curvature_1, compressibility))
+	# TODO: Double check concatenate works the way I think it does
 
 def _SDF_adjustment(frame, left_hand, right_hand):
-	""" for each finger, in each frame report the displacement from that finger to the surface of the corresponding model """
+	""" for each finger, in each frame report the displacement from that finger to the surface of the corresponding model, and also compressibility"""
 	frame = np.asarray(frame, dtype=np.float32).reshape(54, 3)
 	adjustments = np.zeros((54, 3), dtype=np.float32)
 	for idx, point in enumerate(frame):
