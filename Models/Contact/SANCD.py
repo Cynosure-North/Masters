@@ -45,18 +45,14 @@ class SANCD(nn.Module):
 		return output_logits, output
 
 
-def save_checkpoint(model, destination, *, phase=None, epoch=None, validation_loss=None, cleanup_previous=None):
+def save_checkpoint(model, destination, cleanup_previous=None):
 	destination = Path(destination)
 	destination.mkdir(parents=True, exist_ok=True)
 	
 	checkpoint = {
 		"model_config": {
 			"confidence_threshold": model.threshold,
-		},
-		"phase": phase,
-		"epoch": epoch,
-		"validation_loss": validation_loss,
-	}
+		} }
 
 	temporary_path = destination.with_name(f".{destination.name}.tmp")
 
@@ -185,8 +181,8 @@ def train_model(
 				f"Validation -- Overall loss: {validation_metrics[0]:.6f}, "
 				f"Overall accuracy: {validation_metrics[1]:.4%}"
 			)
-		checkpoint = checkpoint_path.with_stem(f"{checkpoint_path.name}_{epoch}")
-		save_checkpoint(model, checkpoint, phase=phase, epoch=epoch)
+		checkpoint = checkpoint_path.with_stem(f"{checkpoint_path.name}_{phase}_{epoch}")
+		save_checkpoint(model, checkpoint)
 
 	_set_requires_grad(model.bert, True)
 	_set_requires_grad(model.bigru, True)

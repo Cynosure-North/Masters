@@ -140,7 +140,7 @@ class CharBERTForMLM(nn.Module):
 		return logits
 
 
-def save_checkpoint(model, destination, *, epoch=None, validation_loss=None, cleanup_previous=None):
+def save_checkpoint(model, destination, cleanup_previous=None):
 	destination = Path(destination)
 	destination.parent.mkdir(parents=True, exist_ok=True)
 	checkpoint = {
@@ -154,9 +154,7 @@ def save_checkpoint(model, destination, *, epoch=None, validation_loss=None, cle
 		},
 		"model_state_dict": model.state_dict(),
 		"optimizer_state_dict": model.optimizer.state_dict(),
-		"scaler_state_dict": model.scaler.state_dict(),
-		"epoch": epoch,
-		"validation_loss": validation_loss }
+		"scaler_state_dict": model.scaler.state_dict() }
 
 	temporary_path = destination.with_name(f".{destination.name}.tmp")
 	torch.save(checkpoint, temporary_path)
@@ -337,16 +335,11 @@ def train_model(
 			batch_loss = loss.detach().item()
 
 			if batch_count % 500 == 0: print(f"batch {batch_count:<6n} of epoch {epoch:<3n} finished -- loss: {batch_loss:.4f}")
-			if save_path is not None and batch_count % checkpoint_interval == 0:
-				checkpoint = save_path.with_name(f"BERT_{epoch}_{batch_count // checkpoint_interval}.pth")
+			if checkpoint_path_path is not None and batch_count % checkpoint_interval == 0:
+				checkpoint = checkpoint_path_path.with_stem(f"{checkpoint_path.stem}_{epoch}_{batch_count // checkpoint_interval}")
+				save_checkpoint(model, checkpoint)
 				torch.save(model.state_dict(), checkpoint)
 				print(f"Saved checkpoint, epoch: {epoch}_{batch_count // checkpoint_interval}")
-
-				# Keep the most recent checkpoint in the current save directory while
-				# preserving the configured basename pattern for the active run.
-				save_path.with_name(
-					f"BERT_{epoch}_{max(batch_count-checkpoint_interval, 0) // checkpoint_interval}.pth") \
-				.unlink(missing_ok=True)
 
 
 		if batch_count == 0:
@@ -450,8 +443,8 @@ def main():
 		
 
 	print("training complete")
-	save_checkpoint(train_model, save_path, cleanup_previous=che)
-	torch.save(trained_model.state_dict(), save_path)
+	save_checkpoint(train_model, save_path,
+		cleanup_previous=save_path.with_stem(save_path.stem.replace("final_", ""))p
 
 	test_dataset = MaskedDataset(train=False, tokenizer=tokenizer, max_length=model.pos_embedding.num_embeddings)
 	test_sampler = LengthBucketBatchSampler(test_dataset.lengths, batch_size=64, shuffle=False)

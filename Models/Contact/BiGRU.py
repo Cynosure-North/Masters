@@ -58,17 +58,10 @@ class BiGRU(nn.Module):
 		return out
 
 
-def save_checkpoint(
-	model,
-	destination,
-	*,
-	epoch=None,
-	validation_loss=None,
-	cleanup_previous=None,
-):
-
+def save_checkpoint(model, destination, cleanup_previous=None):
 	destination = Path(destination)
 	destination.parent.mkdir(parents=True, exist_ok=True)
+
 	checkpoint = {
 		"model_config": {
 			"input_size": model.gru.input_size,
@@ -77,9 +70,7 @@ def save_checkpoint(
 			"output_size": model.fc.out_features },
 		"model_state_dict": model.state_dict(),
 		"optimizer_state_dict": model.optimizer.state_dict(),
-		"scaler_state_dict": model.scaler.state_dict(),
-		"epoch": epoch,
-		"validation_loss": validation_loss }
+		"scaler_state_dict": model.scaler.state_dict() }
 
 	temporary_path = destination.with_name(f".{destination.name}.tmp")
 	torch.save(checkpoint, temporary_path)
@@ -199,7 +190,7 @@ def train_model(
 			message += f", validation loss: {validation_loss:.6f}"
 
 			if validation_loss < best_validation_loss - min_delta:
-				checkpoint = f"{checkpoint_path.stem}_{epoch}"
+				checkpoint = checkpoint_path.with_stem(f"{checkpoint_path.stem}_{epoch}")
 
 				best_validation_loss = validation_loss
 				best_checkpoint = checkpoint
@@ -207,7 +198,7 @@ def train_model(
 
 				save_checkpoint(
 					model,
-					checkpoint_path.with_stem(checkpoint),
+					checkpoint,
 					epoch=epoch,
 					validation_loss=validation_loss)
 			else:

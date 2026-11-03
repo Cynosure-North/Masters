@@ -172,13 +172,13 @@ def train_model(
 		if validation_dataloader is not None:
 			validation_loss, validation_accuracy = test_model(model, validation_dataloader)
 			if validation_loss < best_loss:
-				checkpoint = f"{checkpoint_path.stem}_{epoch}"
+				checkpoint = checkpoint_path.with_stem(f"{checkpoint_path.stem}_{epoch}")
 
 				best_loss = validation_loss
 				best_checkpoint = checkpoint
 				stale_epochs = 0
 
-				save_checkpoint(model, checkpoint_path.with_stem(checkpoint))
+				save_checkpoint(model, checkpoint)
 			else:
 				stale_epochs += 1
 				message += f", patience: {stale_epochs}/{patience}"
