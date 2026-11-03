@@ -286,10 +286,7 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	validation_path = _validation_path or data_dir / "validation.csv"
 	test_path = _test_path or data_dir / "test.csv"
 
-	if save_path.exists():
-		model = instantiate_model(save_path)
-		print("loaded saved weights")
-	elif not THREE_DIMENSIONS:
+	if not THREE_DIMENSIONS:
 		model = BiGRU()
 	else:
 		# Also has [uv, normal, principal curvatures, compressibility]
@@ -297,6 +294,9 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 		model = BiGRU(input_size=16, num_layers=3)
 		save_path = save_path.with_stem(f"{save_path.stem}_3d")
 
+	if save_path.exists():
+		model = instantiate_model(save_path)
+		print("loaded saved weights")
 
 	loader_kwargs = {"batch_size": 64, "collate_fn": pad_variable, "num_workers": 2, "pin_memory": True}
 	train_dataloader = DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)

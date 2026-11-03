@@ -237,14 +237,15 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	validation_path = _validation_path or data_dir / "validation.csv"
 	test_path = _test_path or data_dir / "test.csv"
 
-	if save_path.exists():
-		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))
-		print("loaded saved weights")
-	elif not THREE_DIMENSIONS:
+	if not THREE_DIMENSIONS:
 		model = PoseMLP()
 	else:
 		model = PoseMLP(layers=2)
 		save_path = save_path.with_stem(f"{save_path.stem}_3d")
+
+	if save_path.exists():
+		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))
+		print("loaded saved weights")
 
 	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
 	train_dataloader = DataLoader(PoseDataset(train_path), shuffle=True, **loader_kwargs)

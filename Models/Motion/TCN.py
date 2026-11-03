@@ -254,16 +254,17 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	validation_path = _validation_path or data_dir / "validation"
 	test_path = _test_path or data_dir / "test"
 
-	if save_path.exists():
-		model = instantiate_model(save_path)
-		print("loaded saved weights")
-	elif not THREE_DIMENSIONS:
+	if not THREE_DIMENSIONS:
 		model = TCN()
 	else:
 		# FIXME: Maybe add another layer for the 3d TCN?
 		# Adds in a vector pointing from each fingertip to the nearest surface point, and also compressibility
 		model = TCN(input_features=73)
 		save_path = save_path.with_stem(f"{save_path.stem}_3d")
+
+	if save_path.exists():
+		model = instantiate_model(save_path)
+		print("loaded saved weights")
 
 	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
 	train_dataloader = DataLoader(
