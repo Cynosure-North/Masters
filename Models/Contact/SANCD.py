@@ -38,31 +38,53 @@ class SANCD(nn.Module):
 		filtered_input = torch.where(
 			top1_value > self.threshold,
 			top1_predicted,
-			torch.full_like(top1_predicted, BERT.CharTokenizer().mask_token_id),
-		)
+			torch.full_like(top1_predicted, BERT.CharTokenizer().mask_token_id))
 
 		output = self.bert(filtered_input)
 
 		return output_logits, output
 
 
-def instantiate_model(model_path, bigru_path, bert_path):
-	"""Create a SANCD model and load weights from a saved checkpoint path."""
+def save_checkpoint(model, destination, *, phase=None, epoch=None, validation_loss=None, cleanup_previous=None):
+	destination = Path(destination)
+	destination.mkdir(parents=True, exist_ok=True)
+	
+	checkpoint = {
+		"model_config": {
+			"confidence_threshold": model.threshold,
+		},
+		"phase": phase,
+		"epoch": epoch,
+		"validation_loss": validation_loss,
+	}
 
-	model_path, bigru_path, bert_path = Path(model_path), Path(bigru_path), Path(bert_path)
+	temporary_path = destination.with_name(f".{destination.name}.tmp")
+
+	torch.save(checkpoint, temporary_path / "SANCD.pth")
+	BiGRU.save_checkpoint(model.bigru, temporary_path / "BiGRU.pth")
+	BERT.save_checkpoint(model.bert, temporary_path / "BERT.pth")
+
+	temporary_path.replace(destination)
+
+	if cleanup_previous:
+		for candidate in destination.parent.iterdir():
+			if candidate.is_dir() and candidate.name.startswith(cleanup_previous.name):
+				candidate.rmdir()
+
+def instantiate_model(model_path):
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-	model = SANCD(bigru_path, bert_path).to(device)
-
-	if model_path.exists():
-		state_dict = torch.load(model_path, map_location=device, weights_only=False)
-		if isinstance(state_dict, dict) and any(key.startswith("module.") for key in state_dict):
-			state_dict = {key.replace("module.", "", 1): value for key, value in state_dict.items()}
-		model.load_state_dict(state_dict, strict=True)
-	else:
+	model_path = Path(model_path)
+	if not model_path.exists():
 		raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
 
+	checkpoint = torch.load(model_path / "SANCD.pth", map_location=device, weights_only=False)
+	model = SANCD(
+		model_path / "BiGRU.pth",
+		model_path / "BERT.pth",
+		confidence_threshold=checkpoint["model_config"]["confidence_threshold"]
+	).to(device)
+	
 	return model
-
 
 
 def _loss_for_logits(logits, labels, loss_fn):
@@ -80,12 +102,13 @@ def _set_requires_grad(module, enabled):
 def train_model(
 	model,
 	dataloader,
+	checkpoint_path,
+	*,
 	bert_epochs=3,
 	bigru_epochs=3,
 	alternating_epochs=3,
 	gradient_clip=None,
 	use_amp=True,
-	checkpoint_path=None,
 	validation_dataloader=None,
 	seed=SEED,
 ):
@@ -94,16 +117,13 @@ def train_model(
 	model.to(device)
 	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 	generator = torch.Generator(device=device).manual_seed(seed)
-	bert_optimizer = torch.optim.AdamW(model.bert.parameters(), lr=1e-4)
-	bigru_optimizer = torch.optim.Adam(model.bigru.parameters(), lr=1e-3)
 	amp_enabled = use_amp and device.type == "cuda"
-	scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 
 	def run_epoch(phase, epoch):
 		model.train()
 		_set_requires_grad(model.bert, phase == "bert")
 		_set_requires_grad(model.bigru, phase == "bigru")
-		optimizers = (bert_optimizer, bigru_optimizer)
+		optimizers = (model.bert_optimizer, model.bigru_optimizer)
 		epoch_loss = 0.0
 		batch_count = 0
  
@@ -113,6 +133,7 @@ def train_model(
 			labels = labels.to(device, non_blocking=True)
 			active_index = 0 if phase == "bert" else 1
 			optimizer = optimizers[active_index]
+			scaler = model.bert_scaler if active_index == 0 else model.bigru_scaler
 			optimizer.zero_grad(set_to_none=True)
 
 			with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
@@ -164,8 +185,8 @@ def train_model(
 				f"Validation -- Overall loss: {validation_metrics[0]:.6f}, "
 				f"Overall accuracy: {validation_metrics[1]:.4%}"
 			)
-		if checkpoint_path is not None:
-			torch.save(model.state_dict(), checkpoint_path)
+		checkpoint = checkpoint_path.with_stem(f"{checkpoint_path.name}_{epoch}")
+		save_checkpoint(model, checkpoint, phase=phase, epoch=epoch)
 
 	_set_requires_grad(model.bert, True)
 	_set_requires_grad(model.bigru, True)
@@ -199,7 +220,6 @@ def test_model(
 		bert_predictions = bert_logits.argmax(dim=-1)
 		valid_labels = labels.ne(-100)
 
-		# BERT is SANCD's final decoder; BiGRU is an internal auxiliary component.
 		total_bert_loss += bert_loss.item()
 		total_bert_correct += ((bert_predictions == labels) & valid_labels).sum().item()
 		total_count += valid_labels.sum().item()
@@ -223,15 +243,16 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _bigru_path=N
 	test_path = _test_path or data_dir / "test.csv"
 	bigru_path = _bigru_path or project_dir / "trained" / "best_BiGRU.pth"
 	bert_path = project_dir / "trained" / "best_BERT.pth"
-	save_path = _save_path or project_dir / "trained" / "best_SANCD.pth"
+	save_path = _save_path or project_dir / "trained" / "final_SANCD"
 
-	model = SANCD(bigru_path=bigru_path, bert_path=bert_path)
+	# TODO: can't call exists on None, also want the option to explicitly ignore existing save
+	if save_path.exists():
+		model = instantiate_model(save_path)
+		print("loaded saved weights")
+	else:
+		model = SANCD(bigru_path=bigru_path, bert_path=bert_path)
 
-	loader_kwargs = {
-		"batch_size": 64,
-		"collate_fn": pad_variable,
-		"num_workers": 2,
-		"pin_memory": True }
+	loader_kwargs = { "batch_size": 64, "collate_fn": pad_variable, "num_workers": 2, "pin_memory": True }
 	train_dataloader = DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)
 	validation_dataloader = DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)
 	print("data loaded")
@@ -239,16 +260,17 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _bigru_path=N
 	trained_model = train_model(
 		model,
 		train_dataloader,
+		checkpoint_path=save_path.with_stem(save_path.stem.replace("final_", "")),
 		bert_epochs=4,
 		bigru_epochs=4,
 		alternating_epochs=6,
 		gradient_clip=0.5,
 		use_amp=True,
-		checkpoint_path=save_path,
-		validation_dataloader=validation_dataloader,
-	)
+		validation_dataloader=validation_dataloader)
+
 	print("training complete")
-	torch.save(trained_model.state_dict(), save_path)
+	save_checkpoint(trained_model, save_path,
+		cleanup_previous=save_path.stem.replace("final_", ""))
 
 	test_dataloader = DataLoader(GeometricDataset(test_path), shuffle=False, **loader_kwargs)
 	test_loss, test_accuracy = test_model(trained_model, test_dataloader)

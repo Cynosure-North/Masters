@@ -274,7 +274,7 @@ def tune_alpha_beta(
 
 def run_tuning():
 	project_dir = Path(__file__).resolve().parent
-	llm_path = project_dir / "trained" / "best_LLM.pth"
+	llm_path = project_dir / "trained" / "final_LLM.pth"
 	test_dir = project_dir / "data" / "beamsearch_test"
 
 	if True:
@@ -285,7 +285,7 @@ def run_tuning():
 		train_path, _, _ = random_split(dir_path)
 
 		print("Using TCN output")
-		tcn_path = project_dir / "trained" / "best_TCN.pth"
+		tcn_path = project_dir / "trained" / "final_TCN.pth"
 
 		tcn = TCN.instantiate_model(tcn_path).eval()
 		device = next(tcn.parameters()).device
@@ -379,7 +379,7 @@ def _load_sentence_named_ctc(test_dir):
 
 
 def test():
-	llm_path = Path(__file__).resolve().parent / "trained" / "best_LLM.pth"
+	llm_path = Path(__file__).resolve().parent / "trained" / "final_LLM.pth"
 	test_dir = Path(__file__).resolve().parent / "data" / "beamsearch_test"
 	ctc_sequences, texts = _load_sentence_named_ctc(test_dir)
 

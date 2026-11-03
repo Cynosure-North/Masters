@@ -115,6 +115,8 @@ class CharBERTForMLM(nn.Module):
 			nn.LayerNorm(d_model),
 			nn.Linear(d_model, vocab_size)
 		)
+		self.optimizer = torch.optim.AdamW(self.parameters(), lr=2e-4)
+		self.scaler = torch.amp.GradScaler(enabled=torch.cuda.is_available())
 
 	def forward(self, input_ids, padding_mask=None):
 		# input_ids has shape (batch, sequence); logits has shape (batch, sequence, vocabulary).
@@ -138,19 +140,54 @@ class CharBERTForMLM(nn.Module):
 		return logits
 
 
-def instantiate_model(model_path):
-	"""Create a CharBERTForMLM and load weights from a saved checkpoint path."""
-	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-	model = CharBERTForMLM().to(device)
+def save_checkpoint(model, destination, *, epoch=None, validation_loss=None, cleanup_previous=None):
+	destination = Path(destination)
+	destination.parent.mkdir(parents=True, exist_ok=True)
+	checkpoint = {
+		"model_config": {
+			"vocab_size": model.char_embedding.num_embeddings,
+			"d_model": model.d_model,
+			"nhead": model.transformer_encoder.layers[0].self_attn.num_heads,
+			"num_layers": len(model.transformer_encoder.layers),
+			"max_len": model.pos_embedding.num_embeddings,
+			"dropout": model.dropout.p,
+		},
+		"model_state_dict": model.state_dict(),
+		"optimizer_state_dict": model.optimizer.state_dict(),
+		"scaler_state_dict": model.scaler.state_dict(),
+		"epoch": epoch,
+		"validation_loss": validation_loss }
 
+	temporary_path = destination.with_name(f".{destination.name}.tmp")
+	torch.save(checkpoint, temporary_path)
+	temporary_path.replace(destination)
+
+	if cleanup_previous:
+		for candidate in destination.parent.iterdir():
+			if candidate.is_file() and candidate.suffix == ".pth" and candidate.name.startswith(cleanup_previous.stem):
+				candidate.unlink()
+
+
+def instantiate_model(model_path):
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model_path = Path(model_path)
-	if model_path.exists():
-		state_dict = torch.load(model_path, map_location=device, weights_only=False)
-		if isinstance(state_dict, dict) and any(key.startswith("module.") for key in state_dict):
-			state_dict = {key.replace("module.", "", 1): value for key, value in state_dict.items()}
-		model.load_state_dict(state_dict, strict=True)
-	else:
+	if not model_path.exists():
 		raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
+
+	checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+	config = checkpoint["model_config"]
+	model = CharBERTForMLM(
+		vocab_size=config["vocab_size"].
+		d_model=config["d_model"].
+		nhead=config["nhead"].
+		num_layers=config["num_layers"].
+		max_len=config["max_len"].
+		dropout=config["dropout"].
+	).to(device)
+
+	model.load_state_dict(checkpoint["model_state_dict"], strict=True)
+	model.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+	model.scaler.load_state_dict(checkpoint["scaler_state_dict"])
 
 	return model
 
@@ -236,6 +273,8 @@ def train_model(
 	model,
 	dataloader,
 	tokenizer,
+	checkpoint_path,
+	*,
 	epochs=3,
 	mask_prob=0.15,
 	gradient_clip=None,
@@ -243,7 +282,6 @@ def train_model(
 	loss_fn=None,
 	use_amp=True,
 	use_compile=False,
-	save_path=None,
 	checkpoint_interval=50_000,
 	seed=SEED,
 ):
@@ -254,10 +292,8 @@ def train_model(
 	if use_compile and hasattr(torch, "compile"):
 		compiled_model = model
 		model = torch.compile(model, dynamic=True)
-	optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4, fused=(device.type == "cuda"))
 	loss_fn = loss_fn or nn.CrossEntropyLoss(ignore_index=-100)
 	amp_enabled = use_amp and device.type == "cuda"
-	scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 
 	mask_generator = torch.Generator(device=device).manual_seed(seed)
 
@@ -277,7 +313,7 @@ def train_model(
 				mask_prob,
 			)
 
-			optimizer.zero_grad(set_to_none=True)
+			model.optimizer.zero_grad(set_to_none=True)
 			try:
 				with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
 					logits = model(masked_input_ids, padding_mask=padding_mask)
@@ -291,12 +327,12 @@ def train_model(
 				with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
 					logits = model(masked_input_ids, padding_mask=padding_mask)
 					loss = _mlm_loss(logits, labels, loss_fn)
-			scaler.scale(loss).backward()
+			model.scaler.scale(loss).backward()
 			if gradient_clip is not None:
-				scaler.unscale_(optimizer)
+				model.scaler.unscale_(model.optimizer)
 				torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
-			scaler.step(optimizer)
-			scaler.update()
+			model.scaler.step(model.optimizer)
+			model.scaler.update()
 
 			batch_loss = loss.detach().item()
 
@@ -384,42 +420,42 @@ def test_model(
 
 def main():
 	project_dir = Path(__file__).resolve().parent
-	save_path = project_dir / "trained" / "best_BERT.pth"
-
-	tokenizer = CharTokenizer()
-	model = CharBERTForMLM()
+	save_path = project_dir / "trained" / "final_BERT.pth"
 
 	if save_path.exists():
-		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))
+		model = instantiate_model(save_path)
 		print("loaded saved weights")
+	else:
+		model = CharBERTForMLM()
+	tokenizer = CharTokenizer()
 
 	train_dataset = MaskedDataset(train=True, tokenizer=tokenizer, max_length=model.pos_embedding.num_embeddings)
 	train_sampler = LengthBucketBatchSampler(train_dataset.lengths, batch_size=64, shuffle=True)
+
 	loader_kwargs = {
 		"collate_fn": partial(pad_collate, pad_token_id=tokenizer.pad_token_id),
 		"num_workers": 2,
 		"pin_memory": True,
-		"persistent_workers": True,
-	}
-	dataloader = DataLoader(
-		train_dataset,
-		batch_sampler=train_sampler,
-		**loader_kwargs,
-	)
+		"persistent_workers": True, }
+	dataloader = DataLoader(train_dataset, batch_sampler=train_sampler, **loader_kwargs)
 	print("data loaded")
 
-	trained_model = train_model(model, dataloader, tokenizer, use_amp=True, use_compile=False, save_path=save_path)
+	trained_model = train_model(
+		model,
+		dataloader,
+		tokenizer,
+		checkpoint_path=save_path.with_stem(save_path.stem.replace("final_", "")),
+		use_amp=True,
+		use_compile=False)
+		
 
 	print("training complete")
+	save_checkpoint(train_model, save_path, cleanup_previous=che)
 	torch.save(trained_model.state_dict(), save_path)
 
 	test_dataset = MaskedDataset(train=False, tokenizer=tokenizer, max_length=model.pos_embedding.num_embeddings)
 	test_sampler = LengthBucketBatchSampler(test_dataset.lengths, batch_size=64, shuffle=False)
-	test_dataloader = DataLoader(
-		test_dataset,
-		batch_sampler=test_sampler,
-		**loader_kwargs,
-	)
+	test_dataloader = DataLoader(test_dataset, batch_sampler=test_sampler, **loader_kwargs)
 
 	loss, accuracy = test_model(trained_model, test_dataloader, tokenizer)
 	print(f"Test Loss: {loss:.4f}")

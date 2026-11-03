@@ -6,7 +6,7 @@ from pathlib import Path
 from data import chars, pad_variable, GeometricDataset
 
 SEED = 0
-THREE_DIMENSIOINS = False
+THREE_DIMENSIONS = False
 
 def augment_coordinates(data, generator, *, jitter_pixels=3.0, noise_std=0.01, p=0.5):
 	"""Apply coordinate jitter and gaussian noise"""
@@ -47,6 +47,8 @@ class BiGRU(nn.Module):
 		
 		# Multiply hidden_size by 2 because it is bidirectional
 		self.fc = nn.Linear(hidden_size * 2, output_size)
+		self.optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+		self.scaler = torch.amp.GradScaler(enabled=torch.cuda.is_available())
 
 	def forward(self, data):
 		# Input is (batch, sequence, (x,y) coordinates); output is (batch, sequence, probabilities for each vocab token).
@@ -56,23 +58,60 @@ class BiGRU(nn.Module):
 		return out
 
 
-def instantiate_model(model_path):
-	"""Create a BiGRU and load weights from a saved checkpoint path."""
-	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-	model = BiGRU().to(device)
+def save_checkpoint(
+	model,
+	destination,
+	*,
+	epoch=None,
+	validation_loss=None,
+	cleanup_previous=None,
+):
 
-	# Checkpoints are loaded onto the selected device so CPU evaluation also works.
+	destination = Path(destination)
+	destination.parent.mkdir(parents=True, exist_ok=True)
+	checkpoint = {
+		"model_config": {
+			"input_size": model.gru.input_size,
+			"hidden_size": model.hidden_size,
+			"num_layers": model.num_layers,
+			"output_size": model.fc.out_features },
+		"model_state_dict": model.state_dict(),
+		"optimizer_state_dict": model.optimizer.state_dict(),
+		"scaler_state_dict": model.scaler.state_dict(),
+		"epoch": epoch,
+		"validation_loss": validation_loss }
+
+	temporary_path = destination.with_name(f".{destination.name}.tmp")
+	torch.save(checkpoint, temporary_path)
+	temporary_path.replace(destination)
+
+	if cleanup_previous:
+		for candidate in destination.parent.iterdir():
+			if candidate.is_file() and candidate.suffix == ".pth" and candidate.name.startswith(cleanup_previous):
+				candidate.unlink()
+
+
+
+def instantiate_model(model_path):
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model_path = Path(model_path)
-	if model_path.exists():
-		state_dict = torch.load(model_path, map_location=device, weights_only=False)
-		if isinstance(state_dict, dict) and any(k.startswith("module.") for k in state_dict):
-			state_dict = {k.replace("module.", "", 1): v for k, v in state_dict.items()}
-		model.load_state_dict(state_dict, strict=True)
-	else:
+	if not model_path.exists():
 		raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
 
-	return model
+	checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+	config = checkpoint["model_config"]
+	model = BiGRU(
+		input_size=config["input_size"],
+		hidden_size=config["hidden_size"],
+		num_layers=config["num_layers"],
+		output_size=config["output_size"],
+	).to(device)
 
+	model.load_state_dict(checkpoint["model_state_dict"], strict=True)
+	model.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+	model.scaler.load_state_dict(checkpoint["scaler_state_dict"])
+	
+	return model
 
 def _loss_for_logits(logits, labels, loss_fn):
 	"""Flatten sequence logits and labels at the loss boundary."""
@@ -82,6 +121,8 @@ def _loss_for_logits(logits, labels, loss_fn):
 def train_model(
 	model,
 	dataloader,
+	checkpoint_path,
+	*,
 	validation_dataloader=None,
 	epochs=3,
 	patience=3,
@@ -90,7 +131,6 @@ def train_model(
 	gradient_clip=None,
 	use_amp=True,
 	use_compile=False,
-	checkpoint_path=None,
 	seed=SEED,
 	use_augmentation=True,
 ):
@@ -101,17 +141,17 @@ def train_model(
 	if use_compile and hasattr(torch, "compile"):
 		compiled_model = model
 		model = torch.compile(model, dynamic=True)
-	optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
 	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 	amp_enabled = use_amp and device.type == "cuda"
-	scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 	generator = torch.Generator(device=device).manual_seed(seed)
+
 	best_validation_loss = float("inf")
-	best_state = None
+	best_checkpoint = None
 	stale_epochs = 0
-	model.train()
 
 	for epoch in range(epochs):
+		model.train()
 		batch_count = 0
 		epoch_loss = 0
 		for labels, data in dataloader:
@@ -120,7 +160,7 @@ def train_model(
 			if use_augmentation:
 				data = augment_coordinates(data, generator)
 			labels = labels.flatten().to(device, non_blocking=True)
-			optimizer.zero_grad(set_to_none=True)
+			model.optimizer.zero_grad(set_to_none=True)
 			try:
 				with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
 					output = model(data)
@@ -137,12 +177,12 @@ def train_model(
 					output = model(data)
 					loss = _loss_for_logits(output, labels, loss_fn)
 
-			scaler.scale(loss).backward()
+			model.scaler.scale(loss).backward()
 			if gradient_clip is not None:
-				scaler.unscale_(optimizer)
+				model.scaler.unscale_(model.optimizer)
 				torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
-			scaler.step(optimizer)
-			scaler.update()
+			model.scaler.step(model.optimizer)
+			model.scaler.update()
 
 			batch_count += 1
 			epoch_loss += loss.item()
@@ -151,21 +191,25 @@ def train_model(
 		message = f"Epoch {epoch:<3n} -- train loss: {epoch_loss:.6f}"
 
 		if validation_dataloader is not None:
-			# Validation selects the best checkpoint without updating model parameters.
 			validation_loss, _ = test_model(
 				model,
 				validation_dataloader,
-				use_amp=use_amp,
-			)
+				use_amp=use_amp)
 			model.train()
 			message += f", validation loss: {validation_loss:.6f}"
 
 			if validation_loss < best_validation_loss - min_delta:
+				checkpoint = f"{checkpoint_path.stem}_{epoch}"
+
 				best_validation_loss = validation_loss
-				best_state = deepcopy(model.state_dict())
+				best_checkpoint = checkpoint
 				stale_epochs = 0
-				if checkpoint_path is not None:
-					torch.save(best_state, checkpoint_path)
+
+				save_checkpoint(
+					model,
+					checkpoint_path.with_stem(checkpoint),
+					epoch=epoch,
+					validation_loss=validation_loss)
 			else:
 				stale_epochs += 1
 				message += f", patience: {stale_epochs}/{patience}"
@@ -176,8 +220,8 @@ def train_model(
 
 		print(message)
 
-	if best_state is not None:
-		model.load_state_dict(best_state)
+	if best_checkpoint is not None:
+		model = instantiate_model(best_checkpoint)
 
 	return model
 
@@ -191,17 +235,21 @@ def test_model(
 	"""Evaluate and return average loss and masked-token accuracy."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
+
 	compiled_model = None
 	if use_compile and hasattr(torch, "compile"):
 		compiled_model = model
 		model = torch.compile(model, dynamic=True)
-	model.eval()
+
 	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 	amp_enabled = use_amp and device.type == "cuda"
+
 	total_loss = 0.0
 	total_correct = 0
 	total_count = 0
 	batch_count = 0
+
+	model.eval()
 
 	for labels, data in dataloader:
 		data = data.to(device, non_blocking=True)
@@ -232,23 +280,23 @@ def test_model(
 
 def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=None):
 	project_dir = Path(__file__).resolve().parent
+	save_path = _save_path or project_dir / "trained" / "final_BiGRU.pth"
 	data_dir = project_dir / "data" / "geometric"
 	train_path = _train_path or data_dir / "train.csv"
 	validation_path = _validation_path or data_dir / "validation.csv"
 	test_path = _test_path or data_dir / "test.csv"
 
-	if not THREE_DIMENSIOINS:
+	if save_path.exists():
+		model = instantiate_model(save_path)
+		print("loaded saved weights")
+	elif not THREE_DIMENSIONS:
 		model = BiGRU()
-		save_path = _save_path or project_dir / "trained" / "best_BiGRU.pth"
 	else:
 		# Also has [uv, normal, principal curvatures, compressibility]
 		# FIXME: maybe adding an extra layer to the 3d contact model will help. We will see
 		model = BiGRU(input_size=16, num_layers=3)
-		save_path = _save_path or project_dir / "trained" / "best_BiGRU_3d.pth"
+		save_path = save_path.with_stem(f"{save_path.stem}_3d")
 
-	if save_path.exists():
-		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))
-		print("loaded saved weights")
 
 	loader_kwargs = {"batch_size": 64, "collate_fn": pad_variable, "num_workers": 2, "pin_memory": True}
 	train_dataloader = DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)
@@ -259,15 +307,15 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	trained_model = train_model(
 		model,
 		train_dataloader,
+		checkpoint_path=save_path.with_stem(save_path.stem.replace("final_", "")),
 		epochs=200,
 		validation_dataloader=validation_dataloader,
 		gradient_clip=0.5,
-		use_amp=True,
-		checkpoint_path=save_path,
-	)
+		use_amp=True)
 
 	print("training complete")
-	torch.save(trained_model.state_dict(), save_path)
+	save_checkpoint(trained_model, save_path,
+		cleanup_previous=save_path.stem.replace("final_", ""))
 
 	loss, accuracy = test_model(trained_model, test_dataloader)
 	print(f"Test Loss: {loss:.4f}")

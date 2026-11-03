@@ -145,7 +145,7 @@ def main():
 
 	train_path, val_path, test_path = random_split(dir_path)
 	project_dir = Path(__file__).resolve().parent
-	llm_path = project_dir / "trained" / "best_LLM.pth"
+	llm_path = project_dir / "trained" / "final_LLM.pth"
 	save_path = project_dir / "trained" / "test_TCN.pth"
 
 	if True or not save_path.exists():

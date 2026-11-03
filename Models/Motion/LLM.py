@@ -510,7 +510,7 @@ def train_model(
 
 def main(steps = None):
 	print()
-	save_path = Path(__file__).resolve().parent / "trained" / "best_LLM.pth"
+	save_path = Path(__file__).resolve().parent / "trained" / "final_LLM.pth"
 	train_source = CommonCrawlNewsStream("train", seed=SEED, max_warcs=16)
 	validation_source = CommonCrawlNewsStream("validation", seed=SEED + 1, max_warcs=8)
 	test_source = CommonCrawlNewsStream("test", seed=SEED + 2, max_warcs=8)

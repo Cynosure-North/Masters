@@ -132,6 +132,16 @@ def transform(data, online_scaling=False):
 
 	return vectors
 
+# TODO:
+# There is one caveat: the pose pipeline is a bit inconsistent:
+
+# it computes vectors from raw points
+# then it uses scaler.transform(data) on raw data inside transform(...)
+# but fitting happens on a normalized flattened vector in calculate_params(...)
+# That means the scaler is conceptually intended to stabilize the geometric feature space before PCA, but the implementation is not perfectly unified. Still, the reason for using it is clear: the raw coordinate space is not standardized and PCA would otherwise be dominated by larger-scale geometry.
+
+
+
 def calculate_params(data):
 	data = data.reshape((-1, 10, 3))
 

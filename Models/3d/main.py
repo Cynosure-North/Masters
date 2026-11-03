@@ -93,7 +93,7 @@ class ContactModeller():
 			elif len(val) > 1:
 				raise ValueError("Only one contact point per frame")
 			else:
-				hand = self.left_hand if val[0][0] = 'l' else self.right_hand
+				hand = self.left_hand if val[0][0] == 'l' else self.right_hand
 				res.append(self._unwrap_adjustment(self.frames[idx], val[0], hand.compressibility))
 			.
 		return result

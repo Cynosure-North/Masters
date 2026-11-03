@@ -85,7 +85,7 @@ def main():
 	train_path, val_path, test_path = random_split(csv_path)
 	project_dir = Path(__file__).resolve().parent
 	bigru_path = project_dir / "trained" / "test_BiGRU_weights.pth"
-	bert_path = project_dir / "trained" / "best_BERT.pth"
+	bert_path = project_dir / "trained" / "final_BERT.pth"
 	sacnd_path = project_dir / "trained" / "test_SACND_weights.pth"
 
 	if False or not (bigru_path.exists() and sacnd_path.exists()):

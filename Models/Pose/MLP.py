@@ -18,17 +18,22 @@ from torch.utils.data import DataLoader
 from pathlib import Path
 from data import PoseDataset, finger_list, finger_to_keys
 
-THREE_DIMENSIOINS=False
+THREE_DIMENSIONS=False
 
 class Inidiv_PoseMLP(nn.Module):
 	def __init__(self, *, inputs=25, neurons=60, outputs=9, layers=1):
 		super().__init__()
+		self.inputs = inputs
+		self.neurons = neurons
 		self.outputs = outputs
+		self.layers = layers
+		
+		self.optimizer = torch.optim.AdamW(self.parameters(), lr=1e-3)
 
 		network = nn.Sequential(nn.Linear(inputs, neurons))
-		for n in range(layers-1):
+		for _ in range(layers - 1):
 			network.append(nn.LeakyReLU())
-			network.append(nn.Linear(neurons, neurons)
+			network.append(nn.Linear(neurons, neurons))
 		network.append(nn.LeakyReLU())
 		network.append(nn.Linear(neurons, outputs))
 		self.network = network
@@ -42,13 +47,12 @@ class PoseMLP(nn.Module):
 	def __init__(self, models=None, *, inputs=25, neurons=60, layers=1):
 		super().__init__()
 
-		self.models = nn.ModuleDict()
 		if models is None:
 			models = {
 				key: Inidiv_PoseMLP(inputs=inputs, neurons=neurons, outputs=len(value), layers=layers)
 				for key, value in finger_to_keys.items()
-			}
-		self.models.update(models)
+				if finger_to_keys[finger] }
+		self.models = nn.ModuleDict(models)
 
 	def forward(self, data, finger=None):
 		if finger is None:
@@ -56,54 +60,96 @@ class PoseMLP(nn.Module):
 		if finger not in self.models:
 			raise KeyError(f"No pose model is configured for finger: {finger}")
 		return self.models[finger](data)
+	
+def save_checkpoint(model, destination, cleanup_previous=None):
+	destination = Path(destination)
+	destination.mkdir(parents=True, exist_ok=True)
+	temporary_path = destination.with_name(f".{destination.name}.tmp")
+	
+	# TODO: What is the point of saving validation loss in the checkpoint, or storing the epoch as it's in the name
+	
+	preprocess_checkpoint = {
+		"scaler": data.scaler.get_params(),
+		"pca": data.pca.get_params(),
+	}
+	torch.save(preprocess_checkpoint, temporary_path / "preprocess.pth")
 
-def instantiate_models(model_path):
-	"""Create the multi-finger model and optionally load a checkpoint."""
+	for name, finger in model.models.items():
+		finger_checkpoint = {
+			"model_config": {
+				"inputs": finger.inputs,
+				"neurons": finger.neurons,
+				"outputs": finger.outputs,
+				"layers": finger.layers,
+			},
+			"model_state_dict": finger.state_dict(),
+			"optimizer_state_dict": finger.optimizer.state_dict() }
+		torch.save(finger_checkpoint, temporary_path / f"{name}.pth")
+
+	temporary_path.replace(destination)
+
+	if cleanup_previous:
+		for candidate in destination.parent.iterdir():
+			if candidate.is_dir() and candidate.name.startswith(cleanup_previous.name):
+				candidate.rmdir()
+
+def instantiate_model(model_path):
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-	model = PoseMLP().to(device)
-
 	model_path = Path(model_path)
-	if model_path.exists():
-		state_dict = torch.load(model_path, map_location=device, weights_only=True)
-		model.load_state_dict(state_dict, strict=True)
-	else:
+	if not model_path.exists():
 		raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
 
+	models = {}
+	for file in model_path.iterdir():
+		name = file.stem
+		checkpoint = torch.load(file, map_location=device, weights_only=False)
+		
+		if name == "preprocess":	# TODO: Not confident on the setting of data params
+			data.scaler.set_params(checkpoint["scaler"])
+			data.pca.set_params(checkpoint["pca"])
+		else:
+			config = checkpoint["model_config"]
+			finger_model = Inidiv_PoseMLP(
+				inputs=config["inputs"],
+				neurons=config["neurons"],
+				outputs=config["ouputs"],
+				layers=config["layers"])
+
+			finger_model.load_state_dict(checkpoint["model_state_dict"], strict=True)
+			finger_model.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+			models[name] = finger_model
+	
+	model = PoseMLP(models) 
+	
 	return model
 
 
 def train_model(
 		model,
 		dataloader,
+		checkpoint_path,
 		*,
 		epochs=10,
-		learning_rate=1e-3,
-		checkpoint_path=None,
 		validation_dataloader=None,
-		patience=3
-		):
+		patience=3):
 	"""Train all ten finger classifiers on interleaved key/finger datapoints."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 	loss_fn = nn.CrossEntropyLoss()
-	optimizers = {
-		finger: torch.optim.Adam(model.models[finger].parameters(), lr=learning_rate)
-		for finger in finger_list
-		if finger_to_keys[finger]
-	}
 	best_state = None
 	best_loss = float("inf")
 	stale_epochs = 0
 
 	for epoch in range(epochs):
 		model.train()
-		finger_losses = {finger: [] for finger in optimizers}
+		finger_losses = {finger: [] for finger in model.models.keys()}
 
 		for labels, fingers, features in dataloader:
 			features = features.to(device, non_blocking=True).float()
 			labels = labels.to(device, non_blocking=True).long()
 			
-			for finger, optimizer in optimizers.items():
+			for name, finger in model.models.items():
 				selected = torch.tensor(
 					[current_finger == finger for current_finger in fingers],
 					dtype=torch.bool,
@@ -115,35 +161,40 @@ def train_model(
 				this_finger_features = features[selected]
 				this_finger_labels = labels[selected]
 
-				optimizer.zero_grad(set_to_none=True)
+				finger.optimizer.zero_grad(set_to_none=True)
 				loss = loss_fn(model(this_finger_features, finger), this_finger_labels)
 				loss.backward()
-				optimizer.step()
-				finger_losses[finger].append(loss.item())
+				finger.optimizer.step()
+				finger_losses[name].append(loss.item())
 
 		train_loss = {
 			finger: f"{(sum(losses) / len(losses)):.3f}"
 			for finger, losses in finger_losses.items()
 			if losses }
+		message = f"Epoch {epoch:<3n} -- train loss: {train_loss:.4f}"
 
-		if validation_dataloader is None:
-			print(f"Epoch {epoch + 1:3n} -- train loss: {train_loss:.4f}")
-			continue
-		validation_loss, validation_accuracy = test_model(model, validation_dataloader)
-		if validation_loss < best_loss:
-			best_loss = validation_loss
-			best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
-			stale_epochs = 0
-			if checkpoint_path is not None:
-				torch.save(best_state, checkpoint_path)
-		else:
-			stale_epochs += 1
-		print(f"Epoch {epoch + 1:<3n} -- train loss: {train_loss:.4f}, validation loss: {validation_loss:.4f}, validation accuracy: {validation_accuracy:.4%}")
-		if stale_epochs >= patience:
-			break
+		if validation_dataloader is not None:
+			validation_loss, validation_accuracy = test_model(model, validation_dataloader)
+			if validation_loss < best_loss:
+				checkpoint = f"{checkpoint_path.stem}_{epoch}"
 
-	if best_state is not None:
-		model.load_state_dict(best_state)
+				best_loss = validation_loss
+				best_checkpoint = checkpoint
+				stale_epochs = 0
+
+				save_checkpoint(model, checkpoint_path.with_stem(checkpoint))
+			else:
+				stale_epochs += 1
+				message += f", patience: {stale_epochs}/{patience}"
+				if stale_epochs >= patience and patience != -1:
+					print(message)
+					print("Early stopping")
+					break
+
+		print(message)
+
+	if best_checkpoint is not None:
+		model = instantiate_models(best_checkpoint)
 	return model
 
 
@@ -184,22 +235,20 @@ def test_model(model, dataloader):
 
 def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=None):
 	project_dir = Path(__file__).resolve().parent
+	save_path = _save_path or project_dir / "trained" / "final_MLP.pth"
 	data_dir = project_dir / "data" 
 	train_path = _train_path or data_dir / "train.csv"
 	validation_path = _validation_path or data_dir / "validation.csv"
 	test_path = _test_path or data_dir / "test.csv"
 
-	if not THREE_DIMENSIOINS:
-		model = PoseMLP()
-		save_path = _save_path or project_dir / "trained" / "best_MLP.pth"
-	else:
-		model = PoseMLP(layers=2)
-		save_path = _save_path or project_dir / "trained" / "best_MLP_3d.pth"
-		# TODO: I'll need separate dataloaders for 3d
-
 	if save_path.exists():
 		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))
 		print("loaded saved weights")
+	elif not THREE_DIMENSIONS:
+		model = PoseMLP()
+	else:
+		model = PoseMLP(layers=2)
+		save_path = save_path.with_stem(f"{save_path.stem}_3d")
 
 	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
 	train_dataloader = DataLoader(PoseDataset(train_path), shuffle=True, **loader_kwargs)
@@ -210,12 +259,13 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	trained_model = train_model(
 		model,
 		train_dataloader,
+		checkpoint_path=save_path.with_stem(save_path.stem.replace("final_", "")),
 		epochs=200,
-		validation_dataloader=validation_dataloader,
-	)
+		validation_dataloader=validation_dataloader)
 
 	print("training complete")
-	torch.save(trained_model.state_dict(), save_path)
+	save_checkpoint(trained_model, save_path,
+		cleanup_previous=save_path.stem.replace("final_", ""))
 
 	loss, accuracy = test_model(trained_model, test_dataloader)
 	print(f"Test Loss: {loss:.4f}")
