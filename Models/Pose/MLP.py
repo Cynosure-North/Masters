@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from pathlib import Path
-from data import PoseDataset, finger_list, finger_to_keys
+from data import PoseDataset, finger_list, finger_to_keys, get_preprocessor_state, set_preprocessor_state
 
 THREE_DIMENSIONS=False
 
@@ -51,7 +51,7 @@ class PoseMLP(nn.Module):
 			models = {
 				key: Inidiv_PoseMLP(inputs=inputs, neurons=neurons, outputs=len(value), layers=layers)
 				for key, value in finger_to_keys.items()
-				if finger_to_keys[finger] }
+				if finger_to_keys[key] }
 		self.models = nn.ModuleDict(models)
 
 	def forward(self, data, finger=None):
@@ -190,7 +190,7 @@ def train_model(
 		print(message)
 
 	if best_checkpoint is not None:
-		model = instantiate_models(best_checkpoint)
+		model = instantiate_model(best_checkpoint)
 	return model
 
 

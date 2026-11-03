@@ -95,7 +95,7 @@ class ContactModeller():
 			else:
 				hand = self.left_hand if val[0][0] == 'l' else self.right_hand
 				res.append(self._unwrap_adjustment(self.frames[idx], val[0], hand.compressibility))
-			.
+
 		return result
 
 		
@@ -106,7 +106,6 @@ class ContactModeller():
 		contacting = np.asarray([[]] * len(frames), dtype=object)
 		frames = np.asarray(frames).reshape(-1, 54, 3)
 		for frame_idx, frame in enumerate(frames):
-				contacting[frame_idx] self.contacting_fingers(frame)
 			for finger, finger_idx in self.finger_idxs.items():
 				point = frame[finger_idx]
 
@@ -164,7 +163,7 @@ class InteractiveContactModeller():
 		else:
 			if len(contacting) > 1:
 				displaced_keys.append(contacting[1:])
-			if contacting
+			if contacting:
 				return _unwrap_adjustment(frame, contacting[0])
 		return None
 	

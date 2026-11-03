@@ -148,7 +148,7 @@ def main():
 	llm_path = project_dir / "trained" / "final_LLM.pth"
 	save_path = project_dir / "trained" / "test_TCN.pth"
 
-	if True or not save_path.exists():
+	if True or not save_path.exists():	# noqa: SIM222
 		print("######### Training and testing TCN")
 		TCN.main(train_path, val_path, test_path, save_path)
 	else:
@@ -163,7 +163,7 @@ def main():
 			**loader_kwargs)
 		TCN.test_model(tcn, loader)
 
-		beam_searcher = BeamSearch(llm_path)
+		beam_searcher = BeamSearcher(llm_path)
 		print("######### Testing TCN with CTC prefix beam search")
 
 		incorrect_chars = 0

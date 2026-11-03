@@ -30,7 +30,7 @@ def consent(participant_dir):
 		(participant_dir / "no_quotes").touch()
 
 def main():
-	parent = Path(Path(__file__).parent.parent / "Mocap Data" / f"phase{phase}")
+	parent = Path(Path(__file__).parent.parent / "Mocap Data" / f"phase{PHASE}")
 	participant_dir = make_session_directory(parent)
 	with open(Path(__file__).parent / "data" / "phrases.txt") as f:
 		quotes = f.read().splitlines()

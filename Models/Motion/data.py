@@ -392,7 +392,7 @@ class StreamingTextCorpus:
 				batch = self._sample_cpu_batch(batch_size, block_size)
 				if not self._enqueue_prefetched(("batch", batch)):
 					return
-		except BaseException as exc:
+		except Exception as exc:
 			self._enqueue_prefetched(("error", exc))
 
 	def sample_batch(self, batch_size, block_size, device):

@@ -175,12 +175,12 @@ def instantiate_model(model_path):
 	checkpoint = torch.load(model_path, map_location=device, weights_only=False)
 	config = checkpoint["model_config"]
 	model = CharBERTForMLM(
-		vocab_size=config["vocab_size"].
-		d_model=config["d_model"].
-		nhead=config["nhead"].
-		num_layers=config["num_layers"].
-		max_len=config["max_len"].
-		dropout=config["dropout"].
+		vocab_size=config["vocab_size"],
+		d_model=config["d_model"],
+		nhead=config["nhead"],
+		num_layers=config["num_layers"],
+		max_len=config["max_len"],
+		dropout=config["dropout"],
 	).to(device)
 
 	model.load_state_dict(checkpoint["model_state_dict"], strict=True)
@@ -443,8 +443,8 @@ def main():
 		
 
 	print("training complete")
-	save_checkpoint(train_model, save_path,
-		cleanup_previous=save_path.with_stem(save_path.stem.replace("final_", ""))p
+	save_checkpoint(trained_model, save_path,
+		cleanup_previous=save_path.with_stem(save_path.stem.replace("final_", "")))
 
 	test_dataset = MaskedDataset(train=False, tokenizer=tokenizer, max_length=model.pos_embedding.num_embeddings)
 	test_sampler = LengthBucketBatchSampler(test_dataset.lengths, batch_size=64, shuffle=False)

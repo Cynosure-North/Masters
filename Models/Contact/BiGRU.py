@@ -196,11 +196,7 @@ def train_model(
 				best_checkpoint = checkpoint
 				stale_epochs = 0
 
-				save_checkpoint(
-					model,
-					checkpoint,
-					epoch=epoch,
-					validation_loss=validation_loss)
+				save_checkpoint(model, checkpoint)
 			else:
 				stale_epochs += 1
 				message += f", patience: {stale_epochs}/{patience}"
