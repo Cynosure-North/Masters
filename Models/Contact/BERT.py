@@ -318,7 +318,7 @@ def train_model(
 					loss = _mlm_loss(logits, labels, loss_fn)
 			except RuntimeError as e:
 				if compiled_model is None or not _is_triton_missing(e):
-					raise e
+					raise
 				print("torch.compile is unavailable; continuing with eager execution")
 				model = compiled_model
 				compiled_model = None
@@ -335,8 +335,8 @@ def train_model(
 			batch_loss = loss.detach().item()
 
 			if batch_count % 500 == 0: print(f"batch {batch_count:<6n} of epoch {epoch:<3n} finished -- loss: {batch_loss:.4f}")
-			if checkpoint_path_path is not None and batch_count % checkpoint_interval == 0:
-				checkpoint = checkpoint_path_path.with_stem(f"{checkpoint_path.stem}_{epoch}_{batch_count // checkpoint_interval}")
+			if checkpoint_path is not None and batch_count % checkpoint_interval == 0:
+				checkpoint = checkpoint_path.with_stem(f"{checkpoint_path.stem}_{epoch}_{batch_count // checkpoint_interval}")
 				save_checkpoint(model, checkpoint)
 				torch.save(model.state_dict(), checkpoint)
 				print(f"Saved checkpoint, epoch: {epoch}_{batch_count // checkpoint_interval}")

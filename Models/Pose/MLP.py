@@ -51,7 +51,7 @@ class PoseMLP(nn.Module):
 			models = {
 				key: Inidiv_PoseMLP(inputs=inputs, neurons=neurons, outputs=len(value), layers=layers)
 				for key, value in finger_to_keys.items()
-				if finger_to_keys[key] }
+				if value }
 		self.models = nn.ModuleDict(models)
 
 	def forward(self, data, finger=None):
@@ -133,13 +133,13 @@ def train_model(
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 	loss_fn = nn.CrossEntropyLoss()
-	best_state = None
+	best_checkpoint = None
 	best_loss = float("inf")
 	stale_epochs = 0
 
 	for epoch in range(epochs):
 		model.train()
-		finger_losses = {finger: [] for finger in model.models.keys()}
+		finger_losses = {finger: [] for finger in model.models}
 
 		for labels, fingers, features in dataloader:
 			features = features.to(device, non_blocking=True).float()
@@ -170,7 +170,7 @@ def train_model(
 		message = f"Epoch {epoch:<3n} -- train loss: {train_loss:.4f}"
 
 		if validation_dataloader is not None:
-			validation_loss, validation_accuracy = test_model(model, validation_dataloader)
+			validation_loss, _ = test_model(model, validation_dataloader)
 			if validation_loss < best_loss:
 				checkpoint = checkpoint_path.with_stem(f"{checkpoint_path.stem}_{epoch}")
 

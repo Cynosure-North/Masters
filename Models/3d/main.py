@@ -3,8 +3,7 @@ from fit_shape import (
 	fit_surface,
 	signed_distance_to_surface,
 	surface_uv,
-	surface_normal,
-	principal_curvature_frame,
+	principal_curvature_frame
 )
 
 
@@ -44,12 +43,12 @@ finger_idxs = {
 	"r_ring": 11,
 	"r_little": 12}
 
-def _unwrap_adjustment(self, frame, finger, compressibility):
+def _unwrap_adjustment(frame, finger, surface, compressibility):
 	""" return [uv, normal, principal curvatures, compressabiliy]"""
 	point = frame[finger_idxs[finger]]
 	uv = surface_uv(point, surface)
 	# normal, tangent_u, tangent_v, curvature_0, curvature_1
-	res = principal_curvatures_frame(point, surface)
+	res = principal_curvature_frame(point, surface)
 	return np.concatenate((uv, res, [compressibility]))
 
 def _SDF_adjustment(frame, left_hand, right_hand):
@@ -61,7 +60,7 @@ def _SDF_adjustment(frame, left_hand, right_hand):
 		adjustments[idx] = [signed_distance_to_surface(point, hand.shape), hand.compressibility]
 	return np.concatenate((frame,adjustments), axis=-1)
 	
-class Surface():
+class Surface:
 	def __init__(self, shape, compressibility):
 		# CONCERN: I'm unsure how the motion model will work with a split setup
 		# NOTE: Even for plane fits, it's still good to use the plane SDF rather than just the 2d
@@ -70,7 +69,7 @@ class Surface():
 		self.shape = shape	# 2d = isinstance(surface, PlaneFit)
 		self.compressibility = compressibility
 
-class ContactModeller():
+class ContactModeller:
 	
 	def __init__(self, frames):
 		frames = np.asarray(frames, dtype=np.float32).reshape(-1, 54, 3)
@@ -79,12 +78,12 @@ class ContactModeller():
 		self.left_hand, self.right_hand = Surface(*calibration(frames[:27, :])), Surface(*calibration(frames[27:, :]))
 
 	
-	def motion_transform(franes):
+	def motion_transform(self):
 		func = lambda l: _SDF_adjustment(l, self.left_hand, self.right_hand)
 		return np.vectorize(func)(self.frames)	
 	
 	def contact_transform(self):
-		contacting = _first_touching_frames(self.frames)
+		contacting = self._first_touching_frames(self.frames)
 		result = []
 
 		for idx, val in enumerate(contacting):
@@ -94,7 +93,7 @@ class ContactModeller():
 				raise ValueError("Only one contact point per frame")
 			else:
 				hand = self.left_hand if val[0][0] == 'l' else self.right_hand
-				res.append(self._unwrap_adjustment(self.frames[idx], val[0], hand.compressibility))
+				result.append(self._unwrap_adjustment(self.frames[idx], val[0], hand.shape, hand.compressibility))
 
 		return result
 
@@ -103,13 +102,13 @@ class ContactModeller():
 		""" Identify the first frame of each finger press """
 		# CONCERN: I may need debouncing
 
-		contacting = np.asarray([[]] * len(frames), dtype=object)
-		frames = np.asarray(frames).reshape(-1, 54, 3)
+		contacting = np.asarray([[]] * len(self.frames), dtype=object)
+		frames = np.asarray(self.frames).reshape(-1, 54, 3)
 		for frame_idx, frame in enumerate(frames):
 			for finger, finger_idx in self.finger_idxs.items():
 				point = frame[finger_idx]
 
-				hand = self.left_hand if idx < 8 else self.right_hand
+				hand = self.left_hand if finger_idx < 8 else self.right_hand
 				distance_vector = signed_distance_to_surface(point, hand.shape)
 				if np.linalg.norm(distance_vector) <= 1e-6:
 					contacting[frame_idx].append(finger)
@@ -123,12 +122,10 @@ class ContactModeller():
 		# Yes it could lead to some typos but I doubt it would be that common
 		for i in range(1, len(frames)-1):
 			if len(contacting[i] > 1):
-				if len(contacting[i-1]) == 0:
-					contacting[i-1].append(contacting[i].pop())
-				elif len(contacting[i+1]) == 0:
+				if len(contacting[i-1]) == 0 or len(contacting[i+1]) == 0:
 					contacting[i-1].append(contacting[i].pop())
 				else:
-					raise Error("Can't displace keypress")
+					raise BufferError("Can't displace keypress")
 
 		return contacting
 
@@ -142,14 +139,14 @@ class ContactModeller():
 currently_contacting = []
 displaced_keys = []
 
-class InteractiveContactModeller():
+class InteractiveContactModeller:
 	def contact_transform(self, frame):
 
 		contacting = []
 
 		for finger, (finger_idx, hand) in self.finger_idxs.items():
 			point = frame[finger_idx]
-			hand = self.left_hand if idx < 8 else self.right_hand
+			hand = self.left_hand if finger_idx < 8 else self.right_hand
 			distance_vector = signed_distance_to_surface(point, hand.shape)
 			if np.linalg.norm(distance_vector) <= 1e-6:
 				contacting.append(finger)

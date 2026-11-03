@@ -210,7 +210,7 @@ def test_model(
 		labels = labels.to(device, non_blocking=True)
 
 		with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
-			bigru_logits, bert_logits = model.forward_components(data)
+			_, bert_logits = model.forward_components(data)
 
 		bert_loss = _loss_for_logits(bert_logits, labels, loss_fn)
 		bert_predictions = bert_logits.argmax(dim=-1)

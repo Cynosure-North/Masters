@@ -76,10 +76,6 @@ def random_split(path):
 				batch = []
 				prev_uid, prev_stimulus, prev_frame = None, None, None
 
-				def save_batch():
-					if prev_stimulus is not None:
-						rows.append([prev_stimulus, batch])
-
 				for row in reader:
 					uid = row['uid']
 					label = (row['stimulus'] or "").strip().lower()
@@ -89,7 +85,8 @@ def random_split(path):
 					transformed_values = transform([row[column] for column in markers])
 
 					if uid != prev_uid or label != prev_stimulus:
-						save_batch()
+						if prev_stimulus is not None:
+							rows.append([prev_stimulus, batch])
 						prev_uid, prev_stimulus = uid, label
 						prev_frame = transformed_values
 						batch = []
@@ -99,7 +96,8 @@ def random_split(path):
 					prev_frame = transformed_values
 					batch.append(deltas)
 
-				save_batch()
+				if prev_stimulus is not None:
+					rows.append([prev_stimulus, batch])
 
 
 		print("data loaded")
@@ -138,9 +136,8 @@ def random_split(path):
 	return train_path, val_path, test_path
 
 def main():
-	from BeamSearch import prefix_beam_search, BeamSearcher
 	import TCN
-	import LLM
+	from BeamSearch import BeamSearcher, prefix_beam_search
 	print()
 
 	train_path, val_path, test_path = random_split(dir_path)

@@ -1,55 +1,58 @@
 from __future__ import annotations
-from dataclasses import dataclass, asdict
+
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any
+
 import numpy as np
+
 
 @dataclass
 class MarkerSetDescription:
 	name: str
-	marker_names: Tuple[str, ...]
+	marker_names: tuple[str, ...]
 
 @dataclass
 class RigidBodyMarkerDescription:
 	name: str
 	active_label: int
-	pos: Tuple[float, float, float]
+	pos: tuple[float, float, float]
 
 @dataclass
 class RigidBodyDescription:
 	name: str
 	id_num: int
 	parent_id: int
-	pos: Tuple[float, float, float]
+	pos: tuple[float, float, float]
 	quat: Any = None
-	markers: Tuple[Any, ...] = ()
+	markers: tuple[Any, ...] = ()
 
 @dataclass
 class SkeletonDescription:
 	name: str
 	id_num: int
-	rigid_body_descriptions: Tuple[RigidBodyDescription, ...]
+	rigid_body_descriptions: tuple[RigidBodyDescription, ...]
 
 @dataclass
 class DataDescriptions:
-	marker_sets: Tuple[MarkerSetDescription, ...]
-	rigid_bodies: Tuple[Any, ...] = ()
-	skeletons: Tuple[SkeletonDescription, ...] = ()
-	force_plates: Tuple[Any, ...] = ()
-	devices: Tuple[Any, ...] = ()
-	cameras: Tuple[Any, ...] = ()
-	assets: Tuple[Any, ...] = ()
+	marker_sets: tuple[MarkerSetDescription, ...]
+	rigid_bodies: tuple[Any, ...] = ()
+	skeletons: tuple[SkeletonDescription, ...] = ()
+	force_plates: tuple[Any, ...] = ()
+	devices: tuple[Any, ...] = ()
+	cameras: tuple[Any, ...] = ()
+	assets: tuple[Any, ...] = ()
 
 @dataclass
 class MarkerSet:
 	model_name: str
-	marker_pos_list: Tuple[Tuple[float, float, float], ...]
+	marker_pos_list: tuple[tuple[float, float, float], ...]
 
 @dataclass
 class RigidBody:
 	id_num: int
-	pos: Tuple[float, float, float]
-	rot: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
+	pos: tuple[float, float, float]
+	rot: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
 	markers: Any = None
 	tracking_valid: bool = False
 	marker_error: float = 0.0
@@ -57,12 +60,12 @@ class RigidBody:
 @dataclass
 class Skeleton:
 	id_num: int
-	rigid_bodies: Tuple[RigidBody, ...]
+	rigid_bodies: tuple[RigidBody, ...]
 
 @dataclass
 class LabeledMarker:
 	id_num: int
-	pos: Tuple[float, float, float]
+	pos: tuple[float, float, float]
 	size: float
 	param: int
 	residual: float
@@ -86,14 +89,14 @@ class FrameSuffix:
 @dataclass
 class DataFrame:
 	prefix: FramePrefix
-	marker_sets: Tuple[MarkerSet, ...]
-	unlabeled_marker_pos: Tuple[Tuple[float, float, float], ...]
-	rigid_bodies: Tuple[Any, ...]
-	skeletons: Tuple[Skeleton, ...]
+	marker_sets: tuple[MarkerSet, ...]
+	unlabeled_marker_pos: tuple[tuple[float, float, float], ...]
+	rigid_bodies: tuple[Any, ...]
+	skeletons: tuple[Skeleton, ...]
 	assets: Any = None
-	labeled_markers: Tuple[LabeledMarker, ...] = ()
-	force_plates: Tuple[Any, ...] = ()
-	devices: Tuple[Any, ...] = ()
+	labeled_markers: tuple[LabeledMarker, ...] = ()
+	force_plates: tuple[Any, ...] = ()
+	devices: tuple[Any, ...] = ()
 	suffix: FrameSuffix = None
 
 # Some constructors in the file are used in the data descriptions. Keep them in the
@@ -105,18 +108,18 @@ class DeviceDescription:
 	serial_number: str
 	device_type: int
 	channel_data_type: int
-	channel_names: Tuple[str, ...]
+	channel_names: tuple[str, ...]
 
 @dataclass
 class Device:
 	id_num: int
-	channel_arrays: Tuple[Tuple[float, ...], ...]
+	channel_arrays: tuple[tuple[float, ...], ...]
 
 @dataclass
 class CameraDescription:
 	name: str
-	position: Tuple[float, float, float]
-	orientation_quat: Tuple[float, float, float, float]
+	position: tuple[float, float, float]
+	orientation_quat: tuple[float, float, float, float]
 
 
 def eval_capture(text: str):
@@ -313,7 +316,7 @@ def frame_point_array(frame: DataFrame, description: DataDescriptions, origin: n
 				)
 			]
 			points += [wrist_point, wrist_vector, *fingertips]
-	except Exception as e:
+	except Exception as e:	# noqa: BLE001
 		print(f"Error processing frame {frame.prefix.frame_number}: {e}")
 		return None
 

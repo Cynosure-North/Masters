@@ -8,9 +8,9 @@ import re
 import numpy as np
 from pathlib import Path
 from torch.utils.data import DataLoader
+
 from data import chars, MotionDataset
 import TCN
-
 import ref_beamsearch
 
 
@@ -19,7 +19,7 @@ alphabet = chars + ['-']	# CTC blank (last column)
 char_to_index = {character: index for index, character in enumerate(alphabet)}
 
 
-class BeamSearcher():
+class BeamSearcher:
 	def __init__(self, language_model):
 		if language_model is None:
 			raise ValueError("language_model is required")
@@ -147,7 +147,7 @@ class BeamSearcher():
 				levenshtein = editdistance.eval(old_prefix, new_prefix)
 				score += (Pb[new_prefix] + Pnb[new_prefix]) * levenshtein
 			irrelevance[old_prefix] = score * (len(old_prefix) ** beta)
-		converged_prefix = sorted(irrelevance, key=irrelevance.get)[0]
+		converged_prefix = min(irrelevance)
 
 		# Drop dead paths
 		self.prev_Pb, self.prev_Pnb = defaultdict(float), defaultdict(float)
@@ -281,7 +281,7 @@ def run_tuning():
 		print("Using pregenerated CTC output")
 		ctc_outputs, ctc_labels = _load_sentence_named_ctc(test_dir)
 	else:
-		from test import random_split, dir_path		# Import here to avoid circular imports
+		from test import dir_path, random_split  # Import here to avoid circular imports
 		train_path, _, _ = random_split(dir_path)
 
 		print("Using TCN output")
@@ -334,7 +334,7 @@ def greedy_decoder(ctc):
 
 def _load_sentence_named_ctc(test_dir):
 	"""Load filename-labeled wav2vec CTC arrays in the decoder's alphabet order."""
-	import torchaudio # pyright: ignore[reportMissingImports]
+	import torchaudio  # pyright: ignore[reportMissingImports]
 
 	test_dir = Path(test_dir)
 	if not test_dir.is_dir():

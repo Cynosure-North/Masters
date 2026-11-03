@@ -192,7 +192,7 @@ class SmallTwoTransformerLM(nn.Module):
 				compile_backend = "inductor"
 				if self.device.type == "cuda":
 					try:
-						import triton # pyright: ignore[reportMissingImports]
+						import triton  # pyright: ignore[reportMissingImports]	noqa: F401
 					except ImportError:
 						compile_backend = "aot_eager"
 						print(

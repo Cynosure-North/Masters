@@ -115,8 +115,9 @@ class CommonCrawlNewsStream:
 
 	@staticmethod
 	def _configure_http_session(session):
-		from requests.adapters import HTTPAdapter # pyright: ignore[reportMissingImports, reportMissingModuleSource]
-		from urllib3.util.retry import Retry # pyright: ignore[reportMissingImports]
+		from requests.adapters import HTTPAdapter	# pyright: ignore[reportMissingImports, reportMissingModuleSource]
+		)
+		from urllib3.util.retry import Retry	# pyright: ignore[reportMissingImports]
 
 		retry = Retry(
 			total=5,
@@ -136,7 +137,7 @@ class CommonCrawlNewsStream:
 		if self._warc_paths is not None and not refresh:
 			return self._warc_paths
 
-		import requests # pyright: ignore[reportMissingModuleSource]
+		import requests	# pyright: ignore[reportMissingModuleSource]
 
 		paths = []
 		with requests.Session() as session:
@@ -166,11 +167,7 @@ class CommonCrawlNewsStream:
 		test_buckets = self.SPLIT_BUCKETS["test"]
 		for path in self._get_warc_paths(refresh=refresh):
 			bucket = zlib.crc32(path.encode("utf-8")) % self.SPLIT_MODULUS
-			if self.split == "validation" and bucket in validation_buckets:
-				paths.append(path)
-			elif self.split == "test" and bucket in test_buckets:
-				paths.append(path)
-			elif self.split == "train" and bucket not in validation_buckets | test_buckets:
+			if (self.split == "validation" and bucket in validation_buckets) or (self.split == "test" and bucket in test_buckets) or (self.split == "train" and bucket not in validation_buckets | test_buckets):
 				paths.append(path)
 		if not paths:
 			raise FileNotFoundError(f"No Common Crawl News WARCs available for split {self.split!r}")
@@ -192,7 +189,7 @@ class CommonCrawlNewsStream:
 		if max_documents is not None and max_documents < 1:
 			return
 
-		import requests # pyright: ignore[reportMissingModuleSource]
+		import requests	# pyright: ignore[reportMissingModuleSource]
 
 		documents_yielded = 0
 		cycle = 0
@@ -392,8 +389,8 @@ class StreamingTextCorpus:
 				batch = self._sample_cpu_batch(batch_size, block_size)
 				if not self._enqueue_prefetched(("batch", batch)):
 					return
-		except Exception as exc:
-			self._enqueue_prefetched(("error", exc))
+		except Exception as e:
+			self._enqueue_prefetched(("error", e))
 
 	def sample_batch(self, batch_size, block_size, device):
 		config = (batch_size, block_size)

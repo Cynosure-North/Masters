@@ -87,8 +87,8 @@ class PoseDataset(torch.utils.data.Dataset):
 
 ####################################
 
-from sklearn.preprocessing import StandardScaler # pyright: ignore[reportMissingModuleSource]
-from sklearn.decomposition import PCA # pyright: ignore[reportMissingModuleSource]
+from sklearn.preprocessing import StandardScaler	# pyright: ignore[reportMissingModuleSource]
+from sklearn.decomposition import PCA	# pyright: ignore[reportMissingModuleSource]
 
 scaler = None
 pca = None
@@ -119,10 +119,8 @@ def sample_to_vectors(sample):
 	return np.asarray(vectors, dtype=np.float32).reshape(-1)
 
 def fit_preprocessor(train_data, *, n_components=25):		# CONCERN: Maybe pipeline?
-	global scaler, pca
-
 	scaler.fit(train_data)
-	scaled = scaler.transform(train_vectors)
+	scaled = scaler.transform(train_data)
 
 	pca = PCA(n_components=min(n_components, scaled.shape[1]))
 	pca.fit(scaled)
@@ -133,7 +131,7 @@ def transform(data):
 	if not hasattr(pca, "components_"):
 		raise ValueError("PCA has not been fitted")
 
-	scaled = scaler.transform(vectors)
+	scaled = scaler.transform(data)
 	return pca.transform(scaled)
 
 
@@ -159,13 +157,13 @@ def set_preprocessor_state(state):
 	scaler.mean_ = np.asarray(state["scaler"]["mean"], dtype=np.float32)
 	scaler.scale_ = np.asarray(state["scaler"]["scale"], dtype=np.float32)
 	scaler.var_ = np.asarray(state["scaler"]["var"], dtype=np.float32)
-	scaler.n_features_in_ = int(len(scaler.mean_))
+	scaler.n_features_in_ = len(scaler.mean_)
 
 	pca = PCA(n_components=int(state["pca"]["n_components"]))
 	pca.mean_ = np.asarray(state["pca"]["mean"], dtype=np.float32)
 	pca.components_ = np.asarray(state["pca"]["components"], dtype=np.float32)
 	pca.explained_variance_ = np.asarray(state["pca"]["explained_variance"], dtype=np.float32)
-	pca.n_features_in_ = int(len(pca.mean_))
+	pca.n_features_in_ = len(pca.mean_)
 
 
 	
@@ -173,7 +171,6 @@ def set_preprocessor_state(state):
 
 def preprocess():
 	data_folder = Path(__file__).parent.parent.joinpath("data")
-	pass
 	# TODO: preprocess for pose
 	# 	Determine which finger pressed
 	# 	Determine scale  + pca params from test data

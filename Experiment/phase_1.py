@@ -1,8 +1,8 @@
-import sys
-import random
 import datetime as dt
-from pathlib import Path
+import random
 import tkinter as tk
+from pathlib import Path
+
 
 class Phase1:
 	"""Coordinates current folder and quote state for each recording block."""

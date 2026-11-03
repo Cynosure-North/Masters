@@ -5,10 +5,11 @@
 import csv
 import random
 from pathlib import Path
-from data import pad_variable, GeometricDataset
-from torch.utils.data import DataLoader
+
 import BiGRU
 import SANCD
+from data import GeometricDataset, pad_variable
+from torch.utils.data import DataLoader
 
 SEED = 0
 csv_path = Path(r"C:\Users\mno64\Datasets\tap-typing-with-touch-sensing-images\touch_data.csv")
@@ -49,11 +50,10 @@ def random_split(path):
 					rows.append([sentence, xs, ys])
 					sentence, xs, ys = char, [x], [y]
 					task_id, trial_id = task, trial
-			else:
-				sentence += char
-				xs.append(x)
-				ys.append(y)
-				rows.append([sentence, xs, ys])
+			sentence += char
+			xs.append(x)
+			ys.append(y)
+			rows.append([sentence, xs, ys])
 
 
 		random.Random(SEED).shuffle(rows)
