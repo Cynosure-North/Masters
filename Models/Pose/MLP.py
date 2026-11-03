@@ -68,10 +68,7 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 	
 	# TODO: What is the point of saving validation loss in the checkpoint, or storing the epoch as it's in the name
 	
-	preprocess_checkpoint = {
-		"scaler": data.scaler.get_params(),
-		"pca": data.pca.get_params(),
-	}
+	preprocess_checkpoint = get_preprocessor_state()
 	torch.save(preprocess_checkpoint, temporary_path / "preprocess.pth")
 
 	for name, finger in model.models.items():
@@ -104,15 +101,14 @@ def instantiate_model(model_path):
 		name = file.stem
 		checkpoint = torch.load(file, map_location=device, weights_only=False)
 		
-		if name == "preprocess":	# TODO: Not confident on the setting of data params
-			data.scaler.set_params(checkpoint["scaler"])
-			data.pca.set_params(checkpoint["pca"])
+		if name == "preprocess":
+			set_preprocessor_state(checkpoint)
 		else:
 			config = checkpoint["model_config"]
 			finger_model = Inidiv_PoseMLP(
 				inputs=config["inputs"],
 				neurons=config["neurons"],
-				outputs=config["ouputs"],
+				outputs=config["outputs"],
 				layers=config["layers"])
 
 			finger_model.load_state_dict(checkpoint["model_state_dict"], strict=True)

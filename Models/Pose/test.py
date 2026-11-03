@@ -6,7 +6,7 @@
 import csv
 from pathlib import Path
 import numpy as np
-from data import chars, transform, calculate_params, PoseDataset
+from data import chars, sample_to_vectors, fit_preprocessor, transform, PoseDataset
 from torch.utils.data import DataLoader
 import MLP
 
@@ -23,7 +23,9 @@ def random_split(path):
 	raw_path = data_dir / "raw.csv"
 	output_paths = {train_path.resolve(), val_path.resolve(), test_path.resolve(), raw_path.resolve()}
 
-	if not (train_path.exists() and val_path.exists() and test_path.exists()):
+	if (train_path.exists() and val_path.exists() and test_path.exists()):
+		print("Loaded existing processed data files")
+	else:
 		if path.is_file():
 			source_files = [path]
 		elif data_dir.is_dir():
@@ -102,18 +104,18 @@ def random_split(path):
 					else:
 						continue	 # No button was pressed this frame
 
-					transformed_values = np.asarray(
-						transform([row[column] for column in feature_columns]),
-						dtype=float ).reshape(-1)
+					transformed_vectors = np.asarray(
+						sample_to_vectors([row[column] for column in feature_columns]),
+						dtype=float )
 
-					if transformed_values.size != 30:
+					if transformed_vectors.size != 30:
 						raise ValueError(
 							f"{source_file}, row {reader.line_num}: expected 30 features, "
-							f"got {transformed_values.size}"
+							f"got {transformed_vectors.size}"
 						)
 
 					rows.append([key_symbol, my_finger_names[row["finger"]]] +
-								transformed_values.tolist())
+								transformed_vectors.tolist())
 
 		print("data loaded")
 
@@ -121,14 +123,14 @@ def random_split(path):
 		labels = np.asarray([row[:2] for row in rows], dtype=str)
 		feature_matrix = np.asarray([row[2:] for row in rows], dtype=float)
 
-		_, _, transformed_data = calculate_params(feature_matrix)
-		transformed_data = np.asarray(transformed_data, dtype=float)
+		fit_preprocessor(feature_matrix)
+		
+		transformed_data = np.asarray(transform(feature_matrix), dtype=float)
 
 		if transformed_data.ndim != 2 or transformed_data.shape != (len(rows), 25):
 			raise ValueError(
 				f"Expected transformed features with shape ({len(rows)}, 25), "
-				f"got {transformed_data.shape}"
-			)
+				f"got {transformed_data.shape}")
 
 		rows = np.column_stack((labels, transformed_data))
 
@@ -150,8 +152,6 @@ def random_split(path):
 				writer.writerows(split_rows)
 
 		print("Processing complete")
-	else:
-		print("Loaded existing processed data files")
 
 	return train_path, val_path, test_path
 

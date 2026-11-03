@@ -88,26 +88,20 @@ class PoseDataset(torch.utils.data.Dataset):
 ####################################
 
 from sklearn.preprocessing import StandardScaler # pyright: ignore[reportMissingModuleSource]
-from  sklearn.decomposition import PCA # pyright: ignore[reportMissingModuleSource]
+from sklearn.decomposition import PCA # pyright: ignore[reportMissingModuleSource]
 
-scaler = StandardScaler()
-pca = PCA(n_components=25)
+scaler = None
+pca = None
 
-def transform(data, online_scaling=False):
-	"""
-	Little, Ring, Index, Middle, Thumb - 0 is knuckle, 4 is tip of finger
-	Input format: ['L0_x', 'L0_y', 'L0_z', 'L4_x', 'L4_y', 'L4_z', 'R0_x', 'R0_y', 'R0_z', 'R4_x', 'R4_y', 'R4_z', 'M0_x', 'M0_y', 'M0_z', 'M4_x', 'M4_y', 'M4_z', 'I0_x', 'I0_y', 'I0_z', 'I4_x', 'I4_y', 'I4_z', 'T0_x', 'T0_y', 'T0_z', 'T4_x', 'T4_y', 'T4_z', 'Wout_x', 'Wout_y', 'Wout_z', 'Win_x', 'Win_y', 'Win_z']
-	"""
-	
+
+def sample_to_vectors(sample):
 	try:
-		points = np.asarray(data, dtype=float).reshape(12, 3)
+		points = np.asarray(sample, dtype=float).reshape(12, 3)
 	except (TypeError, ValueError) as err:
 		raise ValueError("Expected 36 numeric coordinates (12 points * 3 axes)") from err
 
 	# Use the midpoint between the two wrist markers.
 	wrist = (points[10] + points[11]) / 2.0
-
-	# Each pair contains a finger's knuckle and fingertip.
 	finger_pairs = (
 		(points[0], points[1]),  # Little
 		(points[2], points[3]),  # Ring
@@ -121,47 +115,59 @@ def transform(data, online_scaling=False):
 		# MF points from the knuckle to the fingertip; MW points to the wrist.
 		mf = fingertip - knuckle
 		mw = wrist - knuckle
-		vectors += [[mf, mw]]
+		vectors.append(np.concatenate([mf, mw]))
+	return np.asarray(vectors, dtype=np.float32).reshape(-1)
 
-	if online_scaling:
-		vectors = np.array(vectors)
-		np.append(vectors, np.ones(5,), axis=-1)
-		vectors = vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
-		scaled = scaler.transform(data)
-		return pca.transform(scaled)
+def fit_preprocessor(train_data, *, n_components=25):		# CONCERN: Maybe pipeline?
+	global scaler, pca
 
-	return vectors
+	scaler.fit(train_data)
+	scaled = scaler.transform(train_vectors)
 
-# TODO:
-# There is one caveat: the pose pipeline is a bit inconsistent:
-
-# it computes vectors from raw points
-# then it uses scaler.transform(data) on raw data inside transform(...)
-# but fitting happens on a normalized flattened vector in calculate_params(...)
-# That means the scaler is conceptually intended to stabilize the geometric feature space before PCA, but the implementation is not perfectly unified. Still, the reason for using it is clear: the raw coordinate space is not standardized and PCA would otherwise be dominated by larger-scale geometry.
-
-
-
-def calculate_params(data):
-	data = data.reshape((-1, 10, 3))
-
-	# This constant tracks the changes made in the following steps
-	# I'm unsure how useful it is
-	np.concatenate((data, np.ones((data.shape[0], 10, 1))), axis=-1)
-
-	# Normalise each vector
-	data = data / np.linalg.norm(data, axis=1, keepdims=True)
-
-	data = data.reshape(-1, 30)
-
-	# Also unsure how necessary this step is but the paper does it
-	scaler.fit(data)
-	scaled = scaler.transform(data)
-	
+	pca = PCA(n_components=min(n_components, scaled.shape[1]))
 	pca.fit(scaled)
-	pca_out = pca.transform(scaled)
 
-	return scaler.get_params(), pca.get_params(), pca_out
+def transform(data):
+	if not hasattr(scaler, "mean_"):
+		raise ValueError("Scaler has not been fitted")
+	if not hasattr(pca, "components_"):
+		raise ValueError("PCA has not been fitted")
+
+	scaled = scaler.transform(vectors)
+	return pca.transform(scaled)
+
+
+def get_preprocessor_state():
+	return {
+		"scaler": {
+			"mean": np.asarray(scaler.mean_, dtype=np.float32).tolist(),
+			"scale": np.asarray(scaler.scale_, dtype=np.float32).tolist(),
+			"var": np.asarray(scaler.var_, dtype=np.float32).tolist(),
+		},
+		"pca": {
+			"mean": np.asarray(pca.mean_, dtype=np.float32).tolist(),
+			"components": np.asarray(pca.components_, dtype=np.float32).tolist(),
+			"explained_variance": np.asarray(pca.explained_variance_, dtype=np.float32).tolist(),
+			"n_components": int(pca.n_components_),
+		},
+	}
+
+def set_preprocessor_state(state):
+	global scaler, pca
+
+	scaler = StandardScaler()
+	scaler.mean_ = np.asarray(state["scaler"]["mean"], dtype=np.float32)
+	scaler.scale_ = np.asarray(state["scaler"]["scale"], dtype=np.float32)
+	scaler.var_ = np.asarray(state["scaler"]["var"], dtype=np.float32)
+	scaler.n_features_in_ = int(len(scaler.mean_))
+
+	pca = PCA(n_components=int(state["pca"]["n_components"]))
+	pca.mean_ = np.asarray(state["pca"]["mean"], dtype=np.float32)
+	pca.components_ = np.asarray(state["pca"]["components"], dtype=np.float32)
+	pca.explained_variance_ = np.asarray(state["pca"]["explained_variance"], dtype=np.float32)
+	pca.n_features_in_ = int(len(pca.mean_))
+
+
 	
 ####################################
 
