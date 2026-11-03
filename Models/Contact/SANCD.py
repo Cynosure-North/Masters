@@ -245,7 +245,6 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _bigru_path=N
 	validation_path = _validation_path or data_dir / "validation.csv"
 	test_path = _test_path or data_dir / "test.csv"
 
-	# TODO: can't call exists on None, also want the option to explicitly ignore existing save
 	if save_path.exists():
 		model = instantiate_model(save_path)
 		print("loaded saved weights")
