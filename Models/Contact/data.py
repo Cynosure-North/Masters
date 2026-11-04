@@ -2,6 +2,7 @@ import torch
 from pathlib import Path
 import numpy as np
 import csv
+from fit_shape import signed_distance_to_surface, surface_uv, principal_curvature_frame
 
 SEED = 0
 
@@ -146,9 +147,101 @@ class MaskedDataset(torch.utils.data.Dataset):
 
 ####################################
 
-def preproces():
+finger_idxs = {
+	"l_little": 2,
+	"l_ring": 3,
+	"l_middle": 4,
+	"l_index": 4,
+	"l_thumb": 5,
+	"r_thumb": 8,
+	"r_index": 9,
+	"r_middle": 10,
+	"r_ring": 11,
+	"r_little": 12}
+
+def _unwrap_adjustment(frame, finger, surface, compressibility):
+	""" return [uv, normal, principal curvatures, compressibility]"""
+	point = frame[finger_idxs[finger]]
+	uv = surface_uv(point, surface)
+	# normal, tangent_u, tangent_v, curvature_0, curvature_1
+	res = principal_curvature_frame(point, surface)
+	return np.concatenate((uv, res, [compressibility]))
+
+def _first_touching_frames(frames, left_hand, right_hand):
+	""" Identify the first frame of each finger press """
+	# CONCERN: I may need debouncing
+
+	contacting = np.asarray([[]] * len(frames), dtype=object)
+	frames = np.asarray(frames).reshape(-1, 54, 3)
+	for frame_idx, frame in enumerate(frames):
+		for finger, finger_idx in finger_idxs.items():
+			point = frame[finger_idx]
+
+			hand = left_hand if finger_idx < 8 else right_hand
+			distance_vector = signed_distance_to_surface(point, hand.shape)
+			if np.linalg.norm(distance_vector) <= 1e-6:
+				contacting[frame_idx].append(finger)
+
+	for i in range(len(frames)-1, 1, -1):
+		for val in contacting[i].copy():
+			if val in contacting[i-1]:
+				contacting[i].remove(val)
+				
+	# If multiple keys are first pressed on the same frame, displace one
+	# Yes it could lead to some typos but I doubt it would be that common
+	for i in range(1, len(frames)-1):
+		if len(contacting[i] > 1):
+			if len(contacting[i-1]) == 0 or len(contacting[i+1]) == 0:
+				contacting[i-1].append(contacting[i].pop())
+			else:
+				raise BufferError("Can't displace keypress")
+
+	return contacting
+
+def transform(frames, left_hand, right_hand):
+	result = []
+
+	for idx, val in enumerate(_first_touching_frames(frames)):
+		if val == []:
+			continue
+		elif len(val) > 1:
+			raise ValueError("Only one contact point per frame")
+		else:
+			hand = left_hand if val[0][0] == 'l' else right_hand
+			result.append(_unwrap_adjustment(frames[idx], val[0], hand.shape, hand.compressibility))
+
+	return result
+
+currently_contacting = []
+displaced_keys = []
+
+def interactive_transform(frame, left_hand, right_hand):
+	contacting = []
+
+	for finger, (finger_idx, hand) in finger_idxs.items():
+		point = frame[finger_idx]
+		hand = left_hand if finger_idx < 8 else right_hand
+		distance_vector = signed_distance_to_surface(point, hand.shape)
+		if np.linalg.norm(distance_vector) <= 1e-6:
+			contacting.append(finger)
+		elif finger in currently_contacting:
+			currently_contacting.remove(finger)
+
+	if displaced_keys:
+		if contacting:
+			displaced_keys.append(contacting)
+		return _unwrap_adjustment(frame, displaced_keys.pop(0))
+	else:
+		if len(contacting) > 1:
+			displaced_keys.append(contacting[1:])
+		if contacting:
+			return _unwrap_adjustment(frame, contacting[0])
+	return None
+
+
+def preprocess():
 	pass
 	# TODO: Preprocess for contact
 
 if __name__ == "__main__":
-	preproces()
+	preprocess()

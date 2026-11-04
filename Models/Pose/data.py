@@ -93,7 +93,6 @@ from sklearn.decomposition import PCA	# pyright: ignore[reportMissingModuleSourc
 scaler = None
 pca = None
 
-
 def sample_to_vectors(sample):
 	try:
 		points = np.asarray(sample, dtype=float).reshape(12, 3)
@@ -125,16 +124,6 @@ def fit_preprocessor(train_data, *, n_components=25):		# CONCERN: Maybe pipeline
 	pca = PCA(n_components=min(n_components, scaled.shape[1]))
 	pca.fit(scaled)
 
-def transform(data):
-	if not hasattr(scaler, "mean_"):
-		raise ValueError("Scaler has not been fitted")
-	if not hasattr(pca, "components_"):
-		raise ValueError("PCA has not been fitted")
-
-	scaled = scaler.transform(data)
-	return pca.transform(scaled)
-
-
 def get_preprocessor_state():
 	return {
 		"scaler": {
@@ -165,12 +154,39 @@ def set_preprocessor_state(state):
 	pca.explained_variance_ = np.asarray(state["pca"]["explained_variance"], dtype=np.float32)
 	pca.n_features_in_ = len(pca.mean_)
 
+def _pose_adjustment(frame):
+	if not hasattr(scaler, "mean_"):
+		raise ValueError("Scaler has not been fitted")
+	if not hasattr(pca, "components_"):
+		raise ValueError("PCA has not been fitted")
 
-	
-####################################
+	scaled = scaler.transform(frame)
+	return pca.transform(scaled)
+
+def transform(frames, _left_hand, _right_hand):
+	return np.vectorize(_pose_adjustment)(frames)	
+
+def interactive_transform(frame, _left_hand, _right_hand):
+	return _pose_adjustment(frame)
 
 def preprocess():
-	data_folder = Path(__file__).parent.parent.joinpath("data")
+	# data_folder = Path(__file__).parent.parent.parent / "Data" / "phase1"
+	raw_data_folder = Path(r"H:\Research_Data\Morgana North(MHIT)\phase1")
+	processed_data_folder = Path(__file__).parent / "Data" / "phase1"
+
+	processed_data_folder.mkdir(exist_ok=True)
+
+	for subject in raw_data_folder.iterdir():
+		for surface in subject.iterdir():
+			pass
+			
+	# Iterate through dirs and subdirs,
+	# Parse to python lists
+	# filter out 2% most extreme lengths (max and mix) (different values for calibration and typing)
+	# for each surface calibrate surface 
+	# Run preprocessing on each phrase
+	# save to corresponding dir in 
+	
 	# TODO: preprocess for pose
 	# 	Determine which finger pressed
 	# 	Determine scale  + pca params from test data

@@ -82,7 +82,15 @@ def random_split(path):
 					if any(char not in chars for char in label):
 						continue
 
-					transformed_values = transform([row[column] for column in markers])
+					data = np.asarray([row[column] for column in markers], dtype=float).reshape(2, 9, 3)
+
+					# The final four markers per hand are Wout, Win, Aout, and Ain.
+					wrist_positions = (data[:, 5] + data[:, 6]) / 2.0
+					arm_positions = (data[:, 7] + data[:, 8]) / 2.0
+					rotation_vectors = arm_positions - wrist_positions
+					lengths = np.linalg.norm(rotation_vectors, axis=1, keepdims=True)
+					wrist_rotations = rotation_vectors / lengths
+					transformed_values = np.hstack((data[:, :5], [wrist_positions, wrist_rotations]))
 
 					if uid != prev_uid or label != prev_stimulus:
 						if prev_stimulus is not None:

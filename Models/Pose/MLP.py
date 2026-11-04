@@ -66,9 +66,7 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 	destination.mkdir(parents=True, exist_ok=True)
 	temporary_path = destination.with_name(f".{destination.name}.tmp")
 	
-	# TODO: What is the point of saving validation loss in the checkpoint, or storing the epoch as it's in the name
-	
-	preprocess_checkpoint = get_preprocessor_state()
+	preprocess_checkpoint = get_preprocessor_state()	# TODO: Maybe save this with the processed data instead
 	torch.save(preprocess_checkpoint, temporary_path / "preprocess.pth")
 
 	for name, finger in model.models.items():

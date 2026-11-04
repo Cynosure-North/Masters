@@ -48,6 +48,30 @@ class RbfSurfaceFit:
 
 SurfaceFit = PlaneFit | EllipsoidFit | ConeFit | CylinderFit | RbfSurfaceFit
 
+@dataclass(frozen=True)
+class Hand:
+	# CONCERN: I'm unsure how the motion model will work with a split setup
+	# NOTE: Even for plane fits, it's still good to use the plane SDF rather than just the 2d
+	# implementation, so I can handle angled planes. So the pipeline is the same regardless of
+	# whether it's 2d or 3d
+	shape: SurfaceFit
+	compressibility: float
+# IDEA: The models don't get the global surface topology, could be good future work
+
+
+def _validate_samples(points: np.ndarray, min_samples: int=3, max_samples: int=500) -> np.ndarray:
+	if len(points) <= max_samples:
+		samples = np.asarray(points, dtype=float)
+	else:
+		samples = np.random.default_rng(0).shuffle(np.asarray(points, dtype=float))[:max_samples]
+	if samples.ndim != 2 or samples.shape[1] != 3:
+		raise ValueError("points must have shape (n, 3)")
+	if samples.shape[0] < min_samples:
+		raise ValueError(f"at least {min_samples} points are required")
+	if not np.isfinite(samples).all():
+		raise ValueError("points must contain only finite values")
+	return samples
+
 def signed_distance_to_surface(
 	point: np.ndarray,
 	surface: SurfaceFit,
@@ -125,21 +149,6 @@ def signed_distance_to_surface(
 			return np.zeros(3, dtype=float)
 		return -field_value * (jacobian / gradient_norm)
 
-
-
-def _validate_samples(points: np.ndarray, min_samples: int=3, max_samples: int=500) -> np.ndarray:
-	if len(points) <= max_samples:
-		samples = np.asarray(points, dtype=float)
-	else:
-		samples = np.random.default_rng(0).shuffle(np.asarray(points, dtype=float))[:max_samples]
-	if samples.ndim != 2 or samples.shape[1] != 3:
-		raise ValueError("points must have shape (n, 3)")
-	if samples.shape[0] < min_samples:
-		raise ValueError(f"at least {min_samples} points are required")
-	if not np.isfinite(samples).all():
-		raise ValueError("points must contain only finite values")
-	return samples
-
 def fit_surface(points: np.ndarray) -> SurfaceFit:
 	"""Fit and select the best least-squares supported surface model.
 
@@ -165,10 +174,143 @@ def fit_surface(points: np.ndarray) -> SurfaceFit:
 	best_fit = min(fits, key=lambda l: residuals[l])
 	residual = residuals[best_fit]
 	scale = np.linalg.norm(samples - samples.mean(axis=0), axis=1).max()
-	if residual <= 0.02 * scale:
+	if residual <= 0.02 * scale:		# FIXME: May need to tune the shape fit threshold
 		return best_fit
 	return fit_rbf_surface(samples)
 
+def fit_plane(points: np.ndarray) -> PlaneFit:
+	"""Fit a least-squares plane to a collection of 3D points."""
+
+	samples = _validate_samples(points)
+	_, _, right_singular_vectors = np.linalg.svd(
+		samples - samples.mean(axis=0), full_matrices=False
+	)
+	normal = right_singular_vectors[-1]
+	normal /= np.linalg.norm(normal)
+	return PlaneFit(point=samples.mean(axis=0), normal=normal)
+
+def fit_ellipsoid(points: np.ndarray) -> EllipsoidFit:
+	"""Fit a least-squares ellipsoid through a collection of 3D points.
+
+	``rotation`` contains the principal axes as columns. At least nine
+	non-coplanar points are required for a stable solution.
+	"""
+
+	samples = _validate_samples(points, 9)
+
+	point_center = samples.mean(axis=0)
+	scale = np.linalg.norm(samples - point_center, axis=1).max()
+	if scale == 0:
+		raise ValueError("points must not all be identical")
+	normalized = (samples - point_center) / scale
+
+	x, y, z = normalized.T
+	design = np.column_stack((
+		x * x,
+		y * y,
+		z * z,
+		2 * x * y,
+		2 * x * z,
+		2 * y * z,
+		2 * x,
+		2 * y,
+		2 * z ))
+	coefficients, _, rank, _ = np.linalg.lstsq( design, np.ones(len(samples)), rcond=None)
+	if rank < 9:
+		raise ValueError("points do not constrain a unique ellipsoid")
+
+	quadratic = np.array([
+		[coefficients[0], coefficients[3], coefficients[4]],
+		[coefficients[3], coefficients[1], coefficients[5]],
+		[coefficients[4], coefficients[5], coefficients[2]] ])
+	linear = coefficients[6:9]
+	eigenvalues, eigenvectors = np.linalg.eigh(quadratic)
+	if np.any(eigenvalues <= 0):
+		raise ValueError("the fitted quadratic is not an ellipsoid")
+
+	normalized_center = -np.linalg.solve(quadratic, linear)
+	squared_radius_scale = 1 + normalized_center @ quadratic @ normalized_center
+	if squared_radius_scale <= 0:
+		raise ValueError("the fitted quadratic does not define a real ellipsoid")
+
+	radii = scale * np.sqrt(squared_radius_scale / eigenvalues)
+	center = point_center + scale * normalized_center
+	order = np.argsort(radii)[::-1]
+	return EllipsoidFit(
+		center=center,
+		radii=radii[order],
+		rotation=eigenvectors[:, order] )
+
+def fit_cone(points: np.ndarray) -> ConeFit:
+	"""Fit a right cone to 3D points.
+
+	The principal axis is estimated by PCA, then the apex and half-angle are
+	fitted from the points' axial and radial distances. At least six points
+	with variation along the axis are required.
+	"""
+	samples = _validate_samples(points, 6)
+
+	point_center = samples.mean(axis=0)
+	centered = samples - point_center
+	_, singular_values, right_singular_vectors = np.linalg.svd(centered, full_matrices=False)
+	if singular_values[0] == 0 or singular_values[1] <= singular_values[0] * 1e-10:
+		raise ValueError("points do not constrain a cone axis")
+	axis = right_singular_vectors[0]
+	axial = centered @ axis
+	radial = np.linalg.norm(centered - np.outer(axial, axis), axis=1)
+	if np.cov(axial, radial)[0, 1] < 0:
+		axis = -axis
+		axial = -axial
+
+	design = np.column_stack((axial, np.ones(len(samples))))
+	if np.linalg.matrix_rank(design) < 2:
+		raise ValueError("points do not constrain a cone apex")
+	slope, intercept = np.linalg.lstsq(design, radial, rcond=None)[0]
+	if slope <= 0:
+		raise ValueError("points do not define a single-nappe cone")
+	apex = point_center - (intercept / slope) * axis
+	return ConeFit(
+		apex=apex,
+		axis=axis,
+		half_angle=float(np.arctan(slope)) )
+
+def fit_cylinder(points: np.ndarray) -> CylinderFit:
+	"""Fit an infinite right circular cylinder to 3D surface samples.
+
+	PCA estimates the cylinder axis. A least-squares circle fit in the
+	perpendicular plane estimates its centerline and radius. At least six
+	points and a clearly dominant axial direction are required.
+	"""
+	samples = _validate_samples(points, 6)
+	point_center = samples.mean(axis=0)
+	centered = samples - point_center
+	_, singular_values, right_singular_vectors = np.linalg.svd(
+		centered, full_matrices=False
+	)
+	if singular_values[0] == 0 or singular_values[0] <= singular_values[1] * 1.05:
+		raise ValueError("points do not constrain a cylinder axis")
+	axis = right_singular_vectors[0]
+	reference = np.eye(3)[np.argmin(np.abs(axis))]
+	basis_u = np.cross(axis, reference)
+	basis_u /= np.linalg.norm(basis_u)
+	basis_v = np.cross(axis, basis_u)
+	coordinates = np.column_stack((centered @ basis_u, centered @ basis_v))
+	x, y = coordinates.T
+	design = np.column_stack((2 * x, 2 * y, np.ones(len(samples))))
+	if np.linalg.matrix_rank(design) < 3:
+		raise ValueError("points do not constrain a unique cylinder radius")
+	circle_parameters, _, _, _ = np.linalg.lstsq(
+		design, x * x + y * y, rcond=None
+	)
+	center_u, center_v, squared_radius_offset = circle_parameters
+	squared_radius = squared_radius_offset + center_u**2 + center_v**2
+	if squared_radius <= 0:
+		raise ValueError("the fitted cylinder radius is not real")
+	axis_point = point_center + center_u * basis_u + center_v * basis_v
+	return CylinderFit(
+		axis_point=axis_point,
+		axis=axis,
+		radius=float(np.sqrt(squared_radius)) )
 
 def fit_rbf_surface(points: np.ndarray) -> RbfSurfaceFit:
 	"""Interpolate a smooth implicit surface through a 3D point cloud.
@@ -233,140 +375,6 @@ def fit_rbf_surface(points: np.ndarray) -> RbfSurfaceFit:
 		weights=coefficients[:len(centers)],
 		polynomial=coefficients[len(centers):])
 
-def fit_cylinder(points: np.ndarray) -> CylinderFit:
-	"""Fit an infinite right circular cylinder to 3D surface samples.
-
-	PCA estimates the cylinder axis. A least-squares circle fit in the
-	perpendicular plane estimates its centerline and radius. At least six
-	points and a clearly dominant axial direction are required.
-	"""
-	samples = _validate_samples(points, 6)
-	point_center = samples.mean(axis=0)
-	centered = samples - point_center
-	_, singular_values, right_singular_vectors = np.linalg.svd(
-		centered, full_matrices=False
-	)
-	if singular_values[0] == 0 or singular_values[0] <= singular_values[1] * 1.05:
-		raise ValueError("points do not constrain a cylinder axis")
-	axis = right_singular_vectors[0]
-	reference = np.eye(3)[np.argmin(np.abs(axis))]
-	basis_u = np.cross(axis, reference)
-	basis_u /= np.linalg.norm(basis_u)
-	basis_v = np.cross(axis, basis_u)
-	coordinates = np.column_stack((centered @ basis_u, centered @ basis_v))
-	x, y = coordinates.T
-	design = np.column_stack((2 * x, 2 * y, np.ones(len(samples))))
-	if np.linalg.matrix_rank(design) < 3:
-		raise ValueError("points do not constrain a unique cylinder radius")
-	circle_parameters, _, _, _ = np.linalg.lstsq(
-		design, x * x + y * y, rcond=None
-	)
-	center_u, center_v, squared_radius_offset = circle_parameters
-	squared_radius = squared_radius_offset + center_u**2 + center_v**2
-	if squared_radius <= 0:
-		raise ValueError("the fitted cylinder radius is not real")
-	axis_point = point_center + center_u * basis_u + center_v * basis_v
-	return CylinderFit(
-		axis_point=axis_point,
-		axis=axis,
-		radius=float(np.sqrt(squared_radius)) )
-
-def fit_cone(points: np.ndarray) -> ConeFit:
-	"""Fit a right cone to 3D points.
-
-	The principal axis is estimated by PCA, then the apex and half-angle are
-	fitted from the points' axial and radial distances. At least six points
-	with variation along the axis are required.
-	"""
-	samples = _validate_samples(points, 6)
-
-	point_center = samples.mean(axis=0)
-	centered = samples - point_center
-	_, singular_values, right_singular_vectors = np.linalg.svd(centered, full_matrices=False)
-	if singular_values[0] == 0 or singular_values[1] <= singular_values[0] * 1e-10:
-		raise ValueError("points do not constrain a cone axis")
-	axis = right_singular_vectors[0]
-	axial = centered @ axis
-	radial = np.linalg.norm(centered - np.outer(axial, axis), axis=1)
-	if np.cov(axial, radial)[0, 1] < 0:
-		axis = -axis
-		axial = -axial
-
-	design = np.column_stack((axial, np.ones(len(samples))))
-	if np.linalg.matrix_rank(design) < 2:
-		raise ValueError("points do not constrain a cone apex")
-	slope, intercept = np.linalg.lstsq(design, radial, rcond=None)[0]
-	if slope <= 0:
-		raise ValueError("points do not define a single-nappe cone")
-	apex = point_center - (intercept / slope) * axis
-	return ConeFit(
-		apex=apex,
-		axis=axis,
-		half_angle=float(np.arctan(slope)) )
-
-
-def fit_plane(points: np.ndarray) -> PlaneFit:
-	"""Fit a least-squares plane to a collection of 3D points."""
-
-	samples = _validate_samples(points)
-	_, _, right_singular_vectors = np.linalg.svd(
-		samples - samples.mean(axis=0), full_matrices=False
-	)
-	normal = right_singular_vectors[-1]
-	normal /= np.linalg.norm(normal)
-	return PlaneFit(point=samples.mean(axis=0), normal=normal)
-
-def fit_ellipsoid(points: np.ndarray) -> EllipsoidFit:
-	"""Fit a least-squares ellipsoid through a collection of 3D points.
-
-	``rotation`` contains the principal axes as columns. At least nine
-	non-coplanar points are required for a stable solution.
-	"""
-
-	samples = _validate_samples(points, 9)
-
-	point_center = samples.mean(axis=0)
-	scale = np.linalg.norm(samples - point_center, axis=1).max()
-	if scale == 0:
-		raise ValueError("points must not all be identical")
-	normalized = (samples - point_center) / scale
-
-	x, y, z = normalized.T
-	design = np.column_stack((
-		x * x,
-		y * y,
-		z * z,
-		2 * x * y,
-		2 * x * z,
-		2 * y * z,
-		2 * x,
-		2 * y,
-		2 * z ))
-	coefficients, _, rank, _ = np.linalg.lstsq( design, np.ones(len(samples)), rcond=None)
-	if rank < 9:
-		raise ValueError("points do not constrain a unique ellipsoid")
-
-	quadratic = np.array([
-		[coefficients[0], coefficients[3], coefficients[4]],
-		[coefficients[3], coefficients[1], coefficients[5]],
-		[coefficients[4], coefficients[5], coefficients[2]] ])
-	linear = coefficients[6:9]
-	eigenvalues, eigenvectors = np.linalg.eigh(quadratic)
-	if np.any(eigenvalues <= 0):
-		raise ValueError("the fitted quadratic is not an ellipsoid")
-
-	normalized_center = -np.linalg.solve(quadratic, linear)
-	squared_radius_scale = 1 + normalized_center @ quadratic @ normalized_center
-	if squared_radius_scale <= 0:
-		raise ValueError("the fitted quadratic does not define a real ellipsoid")
-
-	radii = scale * np.sqrt(squared_radius_scale / eigenvalues)
-	center = point_center + scale * normalized_center
-	order = np.argsort(radii)[::-1]
-	return EllipsoidFit(
-		center=center,
-		radii=radii[order],
-		rotation=eigenvectors[:, order] )
 
 def orthonormal_basis(normal: np.ndarray):
 	normal = np.asarray(normal, dtype=np.float32)
@@ -459,7 +467,7 @@ def principal_curvatures(point: np.ndarray, surface):
 
 
 def principal_curvature_frame(point: np.ndarray, surface):
-	"""Return the local surface frame and principal curvature magnitudes.
+	"""Return the normal, local surface frame and principal curvature magnitudes.
 
 	The tuple is (normal, tangent_u, tangent_v, curvature_u, curvature_v) where
 	tangent_u and tangent_v span the tangent plane, and the curvature values are
@@ -496,3 +504,28 @@ def principal_curvature_frame(point: np.ndarray, surface):
 		principal_v = np.asarray(surface.rotation[:, 1], dtype=np.float32)
 		return normal, principal_u, principal_v, curvatures[0], curvatures[1]
 	return normal, tangent_u, tangent_v, curvatures[0], curvatures[1]
+
+
+def calibrate(frames: np.ndarray) -> Hand:
+	def compressibility(reference_points, subsequent_frames):
+		averages = np.mean(subsequent_frames-reference_points, axis=-1)
+		max_compression_index = np.argmax(averages)
+		max_compression = averages[max_compression_index]
+		end_of_compression = np.argmin(averages[max_compression_index:])
+		
+		if max_compression < 0.2:
+			return 0, 20	# even on hard surfaces fingers have some squish of their own
+		else:
+			return max_compression, end_of_compression
+	
+	frames = frames[:, :5, :]		# discard wrist + knuckles
+
+	reference = np.mean(frames[:60])
+
+	compressibility, end_index = compressibility(reference, frames[70:190])
+
+	shape_fit = fit_surface(frames[70+end_index+10:])
+	
+	return Hand(shape_fit, compressibility)
+	# TODO: This is going to need a lot of work, Some participants are just squeezing for the cushion, and on the pipe and table it's much closer to sliding.
+	# Perhaps a factor could be if there's a clear peak in compression rather than a continuous increase in distance from the reference point

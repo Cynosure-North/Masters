@@ -10,6 +10,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 import numpy as np
 import torch
+from fit_shape import signed_distance_to_surface
+
 
 chars = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', ' ']
 SEED = 0
@@ -116,7 +118,6 @@ class CommonCrawlNewsStream:
 	@staticmethod
 	def _configure_http_session(session):
 		from requests.adapters import HTTPAdapter	# pyright: ignore[reportMissingImports, reportMissingModuleSource]
-		)
 		from urllib3.util.retry import Retry	# pyright: ignore[reportMissingImports]
 
 		retry = Retry(
@@ -417,20 +418,23 @@ class StreamingTextCorpus:
 		self._stop_prefetch.set()
 
 ####################################
-
-def transform(data):
-	data = np.asarray(data, dtype=float).reshape(2, 9, 3)
-
-	# The final four markers per hand are Wout, Win, Aout, and Ain.
-	wrist_positions = (data[:, 5] + data[:, 6]) / 2.0
-	arm_positions = (data[:, 7] + data[:, 8]) / 2.0
-	rotation_vectors = arm_positions - wrist_positions
-	lengths = np.linalg.norm(rotation_vectors, axis=1, keepdims=True)
-	wrist_rotations = rotation_vectors / lengths
-
-	return np.hstack((data[:, :5], [wrist_positions, wrist_rotations]))
 	
+def _SDF_adjustment(frame, left_hand, right_hand):
+	frame = np.asarray(frame, dtype=np.float32).reshape(14, 3)
+	adjustments = np.zeros((14, 1), dtype=np.float32)
+	for idx, point in enumerate(frame):
+		hand = left_hand if idx < 8 else right_hand
+		adjustments[idx] = [signed_distance_to_surface(point, hand.shape), hand.compressibility]
+	return np.concatenate((frame,adjustments), axis=-1)
 
+def transform(frames, left_hand, right_hand):
+	""" for each finger, in each frame report the displacement from that finger to the surface of the corresponding model, and also compressibility"""
+	func = lambda l: _SDF_adjustment(l, left_hand, right_hand)
+	return np.vectorize(func)(frames)	
+
+
+def interactive_transform(frame, left_hand, right_hand):
+	_SDF_adjustment(frame, left_hand, right_hand)
 
 
 def preprocess(path):
