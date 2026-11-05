@@ -56,15 +56,18 @@ class Hand:
 	# whether it's 2d or 3d
 	shape: SurfaceFit
 	compressibility: float
+	rest_point: np.ndarray
+	rest_uv: np.ndarray
 
 # IDEA: The models don't get the global surface topology, could be good future work
 
 
 def _validate_samples(points: np.ndarray, min_samples: int=3, max_samples: int=500) -> np.ndarray:
-	if len(points) <= max_samples:
-		samples = np.asarray(points, dtype=float)
-	else:
-		samples = np.random.default_rng(0).shuffle(np.asarray(points, dtype=float))[:max_samples]
+	samples = np.asarray(points, dtype=float)
+	if len(samples) > max_samples:
+		rng = np.random.default_rng(0)
+		rng.shuffle(samples)
+		samples = samples[:max_samples]
 	if samples.ndim != 2 or samples.shape[1] != 3:
 		raise ValueError("points must have shape (n, 3)")
 	if samples.shape[0] < min_samples:
@@ -159,7 +162,7 @@ def fit_surface(points: np.ndarray) -> SurfaceFit:
 	smooth RBF surface is used as a fallback.
 	"""
 
-	samples =_validate_samples(points)
+	samples = _validate_samples(points)
 	fits: list[SurfaceFit] = []
 	for fit_function in (fit_plane, fit_ellipsoid, fit_cone, fit_cylinder):
 		try:
@@ -167,13 +170,16 @@ def fit_surface(points: np.ndarray) -> SurfaceFit:
 		except ValueError:
 			continue
 		
-	residuals = {
-		surface: np.sqrt(np.mean([
-			np.linalg.norm(signed_distance_to_surface(point, surface)) ** 2 for point in samples ]))
+	residuals = [
+		(
+			surface,
+			np.sqrt(np.mean([
+				np.linalg.norm(signed_distance_to_surface(point, surface)) ** 2 for point in samples
+			]))
+		)
 		for surface in fits
-	}
-	best_fit = min(fits, key=lambda l: residuals[l])
-	residual = residuals[best_fit]
+	]
+	best_fit, residual = min(residuals, key=lambda item: item[1])
 	scale = np.linalg.norm(samples - samples.mean(axis=0), axis=1).max()
 	if residual <= 0.02 * scale:		# FIXME: May need to tune the shape fit threshold
 		return best_fit
@@ -507,27 +513,29 @@ def principal_curvature_frame(point: np.ndarray, surface):
 	return normal, tangent_u, tangent_v, curvatures[0], curvatures[1]
 
 
-# TODO: I'll also want to report the position on that surface the hand rests on, so I can position the keyboard under that (a)
 def calibrate_hand(frames: np.ndarray) -> Hand:
 	def compressibility(reference_points, subsequent_frames):
-		averages = np.mean(subsequent_frames-reference_points, axis=-1)
-		max_compression_index = np.argmax(averages)
-		max_compression = averages[max_compression_index]
-		end_of_compression = np.argmin(averages[max_compression_index:])
-		
+		framewise_displacement = np.mean(subsequent_frames - reference_points, axis=(1, 2))
+		max_compression_index = int(np.argmax(framewise_displacement))
+		max_compression = float(framewise_displacement[max_compression_index])
+		end_of_compression = int(np.argmin(framewise_displacement[max_compression_index:]))
+
 		if max_compression < 0.2:
-			return 0, 20	# even on hard surfaces fingers have some squish of their own
-		else:
-			return max_compression, end_of_compression
-	
+			return 0.0, 20	# even on hard surfaces fingers have some squish of their own
+		return max_compression, end_of_compression
+
 	frames = frames[:, :5, :]		# discard wrist + knuckles
 
-	reference = np.mean(frames[:60])
-
+	reference = np.mean(frames[:60], axis=0)
 	compressibility, end_index = compressibility(reference, frames[70:190])
+	contact_samples = frames[70 + end_index + 10:].reshape(-1, 3)
+	if contact_samples.size == 0:
+		contact_samples = frames.reshape(-1, 3)
+	shape_fit = fit_surface(contact_samples)
 
-	shape_fit = fit_surface(frames[70+end_index+10:])
-	
-	return Hand(shape_fit, compressibility)
+	rest_point = np.mean(contact_samples, axis=0)
+	rest_point = rest_point + signed_distance_to_surface(rest_point, shape_fit)
+	rest_uv = surface_uv(rest_point, shape_fit)
+	return Hand(shape_fit, compressibility, rest_point, rest_uv)
 	# TODO: This is going to need a lot of work, Some participants are just squeezing for the cushion, and on the pipe and table it's much closer to sliding.
 	# Perhaps a factor could be if there's a clear peak in compression rather than a continuous increase in distance from the reference point
