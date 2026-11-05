@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from copy import deepcopy
 from pathlib import Path
 from data import chars, pad_variable, GeometricDataset
 
@@ -279,10 +278,6 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 		# Input is [uv, normal, tangent vectors, principal curvatures, compressibility] instead of [x, y]
 		model = BiGRU(input_size=16, num_layers=3)
 		save_path = save_path.with_stem(f"{save_path.stem}_3d")
-		# TODO: BiGRU won't work for streaming
-		# I could use regular GRU (but apparently there's a risk of instability accumulation, although that can be solved https://share.google/aimode/BMVym80p0icBDVlF5)
-		# Alternatively, I could chunk it
-		# (unclear how they do it in the paper)
 
 		# TODO: BiGRU won't work for streaming
 		# I could use regular GRU (but apparently there's a risk of instability accumulation, although that can be solved https://share.google/aimode/BMVym80p0icBDVlF5)

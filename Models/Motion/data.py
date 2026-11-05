@@ -129,8 +129,8 @@ class CommonCrawlNewsStream:
 
 	@staticmethod
 	def _configure_http_session(session):
-		from requests.adapters import HTTPAdapter	# pyright: ignore[reportMissingImports, reportMissingModuleSource]
-		from urllib3.util.retry import Retry	# pyright: ignore[reportMissingImports]
+		from requests.adapters import HTTPAdapter
+		from urllib3.util.retry import Retry
 
 		retry = Retry(
 			total=8,
@@ -159,7 +159,7 @@ class CommonCrawlNewsStream:
 		if self._warc_paths is not None and not refresh:
 			return self._warc_paths
 
-		import requests	# pyright: ignore[reportMissingModuleSource]
+		import requests
 
 		paths = []
 		with requests.Session() as session:
@@ -266,7 +266,7 @@ class CommonCrawlNewsStream:
 			)
 
 	def _iter_remote_documents(self):
-		import requests	# pyright: ignore[reportMissingModuleSource]
+		import requests
 
 		with requests.Session() as session:
 			self._configure_http_session(session)

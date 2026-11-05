@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from pathlib import Path
-from data import PoseDataset, finger_list, finger_to_keys, get_preprocessor_state, load_preprocessor_state
+from data import PoseDataset, finger_to_keys, load_preprocessor_state
 
 THREE_DIMENSIONS=False
 

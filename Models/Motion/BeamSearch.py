@@ -334,7 +334,7 @@ def greedy_decoder(ctc):
 
 def _load_sentence_named_ctc(test_dir):
 	"""Load filename-labeled wav2vec CTC arrays in the decoder's alphabet order."""
-	import torchaudio  # pyright: ignore[reportMissingImports]
+	import torchaudio
 
 	test_dir = Path(test_dir)
 	if not test_dir.is_dir():

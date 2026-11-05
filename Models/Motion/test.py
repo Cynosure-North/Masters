@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from data import chars, transform, MotionDataset
+from data import chars, MotionDataset
 
 SEED = 0
 dir_path = Path(r"C:\Users\mno64\Datasets\How we type\Motion Capture")

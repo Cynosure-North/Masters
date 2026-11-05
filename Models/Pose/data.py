@@ -2,8 +2,8 @@ import csv
 import torch
 from pathlib import Path
 import numpy as np
-from sklearn.preprocessing import StandardScaler	# pyright: ignore[reportMissingModuleSource]
-from sklearn.decomposition import PCA, IncrementalPCA	# pyright: ignore[reportMissingModuleSource]
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA, IncrementalPCA
 
 chars = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', ' ']
 SEED = 0
