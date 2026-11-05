@@ -435,11 +435,3 @@ def transform(frames, left_hand, right_hand):
 
 def interactive_transform(frame, left_hand, right_hand):
 	_SDF_adjustment(frame, left_hand, right_hand)
-
-
-def preprocess(path):
-	pass
-	# TODO: preprocess for motion
-
-if __name__ == "__main__":
-	preprocess(None)

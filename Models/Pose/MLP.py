@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from pathlib import Path
-from data import PoseDataset, finger_list, finger_to_keys, get_preprocessor_state, set_preprocessor_state
+from data import PoseDataset, finger_list, finger_to_keys, get_preprocessor_state, load_preprocessor_state
 
 THREE_DIMENSIONS=False
 
@@ -66,9 +66,6 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 	destination.mkdir(parents=True, exist_ok=True)
 	temporary_path = destination.with_name(f".{destination.name}.tmp")
 	
-	preprocess_checkpoint = get_preprocessor_state()	# TODO: Maybe save this with the processed data instead
-	torch.save(preprocess_checkpoint, temporary_path / "preprocess.pth")
-
 	for name, finger in model.models.items():
 		finger_checkpoint = {
 			"model_config": {
@@ -94,25 +91,24 @@ def instantiate_model(model_path):
 	if not model_path.exists():
 		raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
 
+	load_preprocessor_state()
+
 	models = {}
 	for file in model_path.iterdir():
 		name = file.stem
 		checkpoint = torch.load(file, map_location=device, weights_only=False)
 		
-		if name == "preprocess":
-			set_preprocessor_state(checkpoint)
-		else:
-			config = checkpoint["model_config"]
-			finger_model = Inidiv_PoseMLP(
-				inputs=config["inputs"],
-				neurons=config["neurons"],
-				outputs=config["outputs"],
-				layers=config["layers"])
+		config = checkpoint["model_config"]
+		finger_model = Inidiv_PoseMLP(
+			inputs=config["inputs"],
+			neurons=config["neurons"],
+			outputs=config["outputs"],
+			layers=config["layers"])
 
-			finger_model.load_state_dict(checkpoint["model_state_dict"], strict=True)
-			finger_model.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+		finger_model.load_state_dict(checkpoint["model_state_dict"], strict=True)
+		finger_model.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
-			models[name] = finger_model
+		models[name] = finger_model
 	
 	model = PoseMLP(models) 
 	
@@ -238,8 +234,14 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	if not THREE_DIMENSIONS:
 		model = PoseMLP()
 	else:
+		# IDEA: Could combine outputs of pose and contact models
 		model = PoseMLP(layers=2)
 		save_path = save_path.with_stem(f"{save_path.stem}_3d")
+
+		# https://karpathy.github.io/2019/04/25/recipe/
+		#
+		# I'll probably want to increase the number of neurons/layers compared to the 2d one
+		# I can test and see how it goes
 
 	if save_path.exists():
 		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))
@@ -268,8 +270,3 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 
 if __name__ == "__main__":
 	main()
-
-# https://karpathy.github.io/2019/04/25/recipe/
-#
-# I'll probably want to increase the number of neurons/layers compared to the 2d one
-# I can test and see how it goes

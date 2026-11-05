@@ -2,6 +2,8 @@ import torch
 from pathlib import Path
 import numpy as np
 import csv
+import sys
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 from fit_shape import signed_distance_to_surface, surface_uv, principal_curvature_frame
 
 SEED = 0
@@ -188,7 +190,7 @@ def _first_touching_frames(frames, left_hand, right_hand):
 				contacting[i].remove(val)
 				
 	# If multiple keys are first pressed on the same frame, displace one
-	# Yes it could lead to some typos but I doubt it would be that common
+	# NOTE: It could lead to some typos but I doubt it would be that common
 	for i in range(1, len(frames)-1):
 		if len(contacting[i] > 1):
 			if len(contacting[i-1]) == 0 or len(contacting[i+1]) == 0:
@@ -237,11 +239,3 @@ def interactive_transform(frame, left_hand, right_hand):
 		if contacting:
 			return _unwrap_adjustment(frame, contacting[0])
 	return None
-
-
-def preprocess():
-	pass
-	# TODO: Preprocess for contact
-
-if __name__ == "__main__":
-	preprocess()

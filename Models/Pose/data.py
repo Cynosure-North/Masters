@@ -2,6 +2,8 @@ import csv
 import torch
 from pathlib import Path
 import numpy as np
+from sklearn.preprocessing import StandardScaler	# pyright: ignore[reportMissingModuleSource]
+from sklearn.decomposition import PCA, IncrementalPCA	# pyright: ignore[reportMissingModuleSource]
 
 chars = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', ' ']
 SEED = 0
@@ -87,41 +89,21 @@ class PoseDataset(torch.utils.data.Dataset):
 
 ####################################
 
-from sklearn.preprocessing import StandardScaler	# pyright: ignore[reportMissingModuleSource]
-from sklearn.decomposition import PCA	# pyright: ignore[reportMissingModuleSource]
-
 scaler = None
 pca = None
 
-def sample_to_vectors(sample):
-	try:
-		points = np.asarray(sample, dtype=float).reshape(12, 3)
-	except (TypeError, ValueError) as err:
-		raise ValueError("Expected 36 numeric coordinates (12 points * 3 axes)") from err
+def fit_scaler(train_data):		# CONCERN: Maybe pipeline?
+	if scaler is None:
+		scaler = StandardScaler()
 
-	# Use the midpoint between the two wrist markers.
-	wrist = (points[10] + points[11]) / 2.0
-	finger_pairs = (
-		(points[0], points[1]),  # Little
-		(points[2], points[3]),  # Ring
-		(points[4], points[5]),  # Middle
-		(points[6], points[7]),  # Index
-		(points[8], points[9]),  # Thumb
-	)
+	scaler.partial_fit(train_data)
 
-	vectors = []
-	for knuckle, fingertip in finger_pairs:
-		# MF points from the knuckle to the fingertip; MW points to the wrist.
-		mf = fingertip - knuckle
-		mw = wrist - knuckle
-		vectors.append(np.concatenate([mf, mw]))
-	return np.asarray(vectors, dtype=np.float32).reshape(-1)
-
-def fit_preprocessor(train_data, *, n_components=25):		# CONCERN: Maybe pipeline?
-	scaler.fit(train_data)
+def fit_pca(train_data, n_components=25):
 	scaled = scaler.transform(train_data)
 
-	pca = PCA(n_components=min(n_components, scaled.shape[1]))
+	if pca is None:
+		pca = IncrementalPCA(n_components=min(n_components, scaled.shape[1]))
+
 	pca.fit(scaled)
 
 def get_preprocessor_state():
@@ -139,7 +121,9 @@ def get_preprocessor_state():
 		},
 	}
 
-def set_preprocessor_state(state):
+def load_preprocessor_state(state):
+	params_path = Path(__file__).parent / "data" / "preprocessor_params"
+	state = np.load(params_path, allow_pickle=True).item()
 	global scaler, pca
 
 	scaler = StandardScaler()
@@ -160,37 +144,27 @@ def _pose_adjustment(frame):
 	if not hasattr(pca, "components_"):
 		raise ValueError("PCA has not been fitted")
 
-	scaled = scaler.transform(frame)
-	return pca.transform(scaled)
+	# Use the midpoint between the two wrist markers.
+	wrist = (frame[10] + frame[11]) / 2.0
+	finger_pairs = (
+		(frame[0], frame[1]),  # Little
+		(frame[2], frame[3]),  # Ring
+		(frame[4], frame[5]),  # Middle
+		(frame[6], frame[7]),  # Index
+		(frame[8], frame[9]) ) # Thumb
 
-def transform(frames, _left_hand, _right_hand):
-	return np.vectorize(_pose_adjustment)(frames)	
+	vectors = []
+	for knuckle, fingertip in finger_pairs:
+		# MF points from the knuckle to the fingertip; MW points to the wrist.
+		mf = fingertip - knuckle
+		mw = wrist - knuckle
+		vectors.append(np.concatenate([mf, mw]))
 
-def interactive_transform(frame, _left_hand, _right_hand):
+	vals = np.asarray(vectors, dtype=np.float32).reshape(-1)
+	return pca.transform(scaler.transform(vals))
+
+def transform(frames):
+	return np.vectorize(_pose_adjustment)(frames)
+
+def interactive_transform(frame):
 	return _pose_adjustment(frame)
-
-def preprocess():
-	# data_folder = Path(__file__).parent.parent.parent / "Data" / "phase1"
-	raw_data_folder = Path(r"H:\Research_Data\Morgana North(MHIT)\phase1")
-	processed_data_folder = Path(__file__).parent / "Data" / "phase1"
-
-	processed_data_folder.mkdir(exist_ok=True)
-
-	for subject in raw_data_folder.iterdir():
-		for surface in subject.iterdir():
-			pass
-			
-	# Iterate through dirs and subdirs,
-	# Parse to python lists
-	# filter out 2% most extreme lengths (max and mix) (different values for calibration and typing)
-	# for each surface calibrate surface 
-	# Run preprocessing on each phrase
-	# save to corresponding dir in 
-	
-	# TODO: preprocess for pose
-	# 	Determine which finger pressed
-	# 	Determine scale  + pca params from test data
-
-
-if __name__ == "__main__":
-	preprocess()
