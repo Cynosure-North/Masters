@@ -186,11 +186,7 @@ def train_model(
 				best_checkpoint = checkpoint
 				stale_epochs = 0
 
-				save_checkpoint(
-					model,
-					checkpoint,
-					epoch=epoch,
-					validation_loss=validation_loss)
+				save_checkpoint(model, checkpoint)
 			else:
 				stale_epochs += 1
 				message += f", patience: {stale_epochs}/{patience}"
@@ -255,7 +251,6 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	if not THREE_DIMENSIONS:
 		model = TCN()
 	else:
-		# FIXME: Maybe add another layer for the 3d TCN?
 		# Adds in a vector pointing from each fingertip to the nearest surface point, and also compressibility
 		model = TCN(input_features=73)
 		save_path = save_path.with_stem(f"{save_path.stem}_3d")
