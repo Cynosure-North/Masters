@@ -92,7 +92,7 @@ class PoseDataset(torch.utils.data.Dataset):
 scaler = None
 pca = None
 
-def fit_scaler(train_data):		# CONCERN: Maybe pipeline?
+def fit_scaler(train_data):
 	if scaler is None:
 		scaler = StandardScaler()
 

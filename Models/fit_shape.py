@@ -56,6 +56,7 @@ class Hand:
 	# whether it's 2d or 3d
 	shape: SurfaceFit
 	compressibility: float
+
 # IDEA: The models don't get the global surface topology, could be good future work
 
 
@@ -506,7 +507,8 @@ def principal_curvature_frame(point: np.ndarray, surface):
 	return normal, tangent_u, tangent_v, curvatures[0], curvatures[1]
 
 
-def calibrate(frames: np.ndarray) -> Hand:
+# TODO: I'll also want to report the position on that surface the hand rests on, so I can position the keyboard under that (a)
+def calibrate_hand(frames: np.ndarray) -> Hand:
 	def compressibility(reference_points, subsequent_frames):
 		averages = np.mean(subsequent_frames-reference_points, axis=-1)
 		max_compression_index = np.argmax(averages)

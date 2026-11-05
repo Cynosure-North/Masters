@@ -186,11 +186,7 @@ def train_model(
 				best_checkpoint = checkpoint
 				stale_epochs = 0
 
-				save_checkpoint(
-					model,
-					checkpoint,
-					epoch=epoch,
-					validation_loss=validation_loss)
+				save_checkpoint(model, checkpoint)
 			else:
 				stale_epochs += 1
 				message += f", patience: {stale_epochs}/{patience}"
@@ -255,10 +251,12 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	if not THREE_DIMENSIONS:
 		model = TCN()
 	else:
-		# FIXME: Maybe add another layer for the 3d TCN?
 		# Adds in a vector pointing from each fingertip to the nearest surface point, and also compressibility
 		model = TCN(input_features=73)
 		save_path = save_path.with_stem(f"{save_path.stem}_3d")
+
+		# IDEA: It could also be good to test the motion model with only the 3d motion data and none of the surface data
+		# It would be more robust and may work just as well if the model focuses on reversals of finger velocity
 
 	if save_path.exists():
 		model = instantiate_model(save_path)
@@ -293,5 +291,3 @@ if __name__ == "__main__":
 	main()
 
 # TODO: TCN is cooked, perhaps because I'm not using the full keyboard? IDK needs more testing
-
-# IDEA: It could also be good to test the motion model with only the motion data and none of the surface data

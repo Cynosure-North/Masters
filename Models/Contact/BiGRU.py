@@ -276,10 +276,16 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	if not THREE_DIMENSIONS:
 		model = BiGRU()
 	else:
-		# Also has [uv, normal, principal curvatures, compressibility]
-		# FIXME: maybe adding an extra layer to the 3d contact model will help. We will see
+		# Input is [uv, normal, tangent vectors, principal curvatures, compressibility] instead of [x, y]
 		model = BiGRU(input_size=16, num_layers=3)
 		save_path = save_path.with_stem(f"{save_path.stem}_3d")
+
+		# TODO: BiGRU won't work for streaming
+		# I could use regular GRU (but apparently there's a risk of instability accumulation, although that can be solved https://share.google/aimode/BMVym80p0icBDVlF5)
+		# Alternatively, I could chunk it
+		# (unclear how they do it in the paper)
+
+		# IDEA: I could train the model only using UV coordinates
 
 	if save_path.exists():
 		model = instantiate_model(save_path)

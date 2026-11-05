@@ -89,8 +89,6 @@ import BERT
 import BiGRU
 import SANCD
 
-# IDEA: I could try averaging the contact and pose models
-
 def interactive():
 	pass
 	# TODO: Interactive mode for contact
