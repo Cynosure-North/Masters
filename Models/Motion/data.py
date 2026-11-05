@@ -1,4 +1,5 @@
 import gzip
+import hashlib
 import math
 import queue
 import random
@@ -10,6 +11,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 import numpy as np
 import torch
+import sys
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 from fit_shape import signed_distance_to_surface
 
 
@@ -76,9 +79,11 @@ class _ArticleTextParser(HTMLParser):
 
 
 class CommonCrawlNewsStream:
-	"""Stream a split-specific sample from recent Common Crawl News WARCs."""
+	"""Stream cached and newly downloaded documents from Common Crawl News."""
 
 	BASE_URL = "https://data.commoncrawl.org/crawl-data/CC-NEWS"
+	CACHE_DIR = Path(__file__).resolve().parent / "_cache" / "cc-news"
+	DOCUMENT_CACHE_DIR = CACHE_DIR / "documents"
 	SPLIT_MODULUS = 20
 	SPLIT_BUCKETS = {"validation": set(range(3)), "test": set(range(3, 6))}
 
@@ -91,6 +96,8 @@ class CommonCrawlNewsStream:
 		lookback_months=12,
 		documents_per_warc=100,
 		min_chars=300,
+		max_cache_documents=10_000,
+		max_cache_bytes=256 * 1024 * 1024,
 	):
 		if split not in {"train", "validation", "test"}:
 			raise ValueError("split must be 'train', 'validation', or 'test'")
@@ -98,14 +105,19 @@ class CommonCrawlNewsStream:
 			raise ValueError("max_warcs must be at least 1")
 		if lookback_months < 1 or documents_per_warc < 1:
 			raise ValueError("lookback_months and documents_per_warc must be at least 1")
+		if max_cache_documents < 1 or max_cache_bytes < 1:
+			raise ValueError("cache limits must be at least 1")
 		self.split = split
 		self.seed = seed
 		self.max_warcs = max_warcs
 		self.lookback_months = lookback_months
 		self.documents_per_warc = documents_per_warc
 		self.min_chars = min_chars
+		self.max_cache_documents = max_cache_documents
+		self.max_cache_bytes = max_cache_bytes
 		self._warc_paths = None
 		self._iteration = 0
+		self._cache_lock = threading.RLock()
 
 	def _months(self):
 		today = date.today()
@@ -121,11 +133,12 @@ class CommonCrawlNewsStream:
 		from urllib3.util.retry import Retry	# pyright: ignore[reportMissingImports]
 
 		retry = Retry(
-			total=5,
-			connect=5,
-			read=5,
-			status=5,
-			backoff_factor=1,
+			total=8,
+			connect=8,
+			read=8,
+			status=8,
+			backoff_factor=3,
+			backoff_jitter=1,
 			status_forcelist=(429, 500, 502, 503, 504),
 			allowed_methods=frozenset({"GET"}),
 			respect_retry_after_header=True,
@@ -133,6 +146,14 @@ class CommonCrawlNewsStream:
 		adapter = HTTPAdapter(max_retries=retry)
 		session.mount("https://", adapter)
 		session.mount("http://", adapter)
+		session.headers.update({
+			"User-Agent": "Mozilla/5.0 (compatible; ThesisLanguageModel/1.0; research use)",
+			"Accept": "application/gzip, */*",
+		})
+
+	@classmethod
+	def _listing_cache_path(cls, year, month):
+		return cls.CACHE_DIR / f"{year:04d}-{month:02d}.paths"
 
 	def _get_warc_paths(self, *, refresh=False):
 		if self._warc_paths is not None and not refresh:
@@ -144,6 +165,15 @@ class CommonCrawlNewsStream:
 		with requests.Session() as session:
 			self._configure_http_session(session)
 			for year, month in self._months():
+				cache_path = self._listing_cache_path(year, month)
+				if not refresh and cache_path.exists():
+					try:
+						listing = cache_path.read_text(encoding="utf-8")
+						paths.extend(line.strip() for line in listing.splitlines() if line.strip())
+						continue
+					except (OSError, UnicodeError) as exc:
+						print(f"Ignoring invalid CC-NEWS cache {cache_path}: {exc}")
+
 				url = f"{self.BASE_URL}/{year}/{month:02d}/warc.paths.gz"
 				try:
 					response = session.get(url, timeout=(15, 60))
@@ -157,6 +187,13 @@ class CommonCrawlNewsStream:
 				except (OSError, UnicodeDecodeError) as exc:
 					print(f"Skipping invalid CC-NEWS listing {url}: {exc}")
 					continue
+				try:
+					cache_path.parent.mkdir(parents=True, exist_ok=True)
+					temporary_path = cache_path.with_suffix(".tmp")
+					temporary_path.write_text(listing, encoding="utf-8")
+					temporary_path.replace(cache_path)
+				except OSError as exc:
+					print(f"Could not cache CC-NEWS listing {cache_path}: {exc}")
 				paths.extend(line.strip() for line in listing.splitlines() if line.strip())
 
 		self._warc_paths = paths
@@ -185,28 +222,62 @@ class CommonCrawlNewsStream:
 		parser.close()
 		return " ".join(parser.parts)
 
-	def iter_documents(self, *, max_documents=None):
-		"""Yield HTML text continuously, refreshing available WARC listings per cycle."""
-		if max_documents is not None and max_documents < 1:
-			return
+	@property
+	def _document_cache_path(self):
+		cache_path = self.DOCUMENT_CACHE_DIR / self.split
+		cache_path.mkdir(parents=True, exist_ok=True)
+		return cache_path
 
+	def _cached_document_paths(self):
+		with self._cache_lock:
+			return sorted(self._document_cache_path.glob("*.txt"))
+
+	def _cache_document(self, text):
+		"""Persist a document when it fits without evicting existing documents."""
+		document_path = self._document_cache_path / (
+			f"{hashlib.sha256(text.encode('utf-8')).hexdigest()}.txt"
+		)
+		with self._cache_lock:
+			paths = self._cached_document_paths()
+			if document_path.exists():
+				return True
+			total_bytes = sum(path.stat().st_size for path in paths)
+			document_bytes = len(text.encode("utf-8"))
+			if (
+				len(paths) >= self.max_cache_documents
+				or total_bytes + document_bytes > self.max_cache_bytes
+			):
+				return False
+			temporary_path = document_path.with_suffix(".tmp")
+			try:
+				temporary_path.write_text(text, encoding="utf-8")
+				temporary_path.replace(document_path)
+			except OSError as exc:
+				print(f"Could not cache Common Crawl document {document_path}: {exc}")
+				return False
+			return True
+
+	def _cache_has_capacity(self):
+		with self._cache_lock:
+			paths = self._cached_document_paths()
+			return (
+				len(paths) < self.max_cache_documents
+				and sum(path.stat().st_size for path in paths) < self.max_cache_bytes
+			)
+
+	def _iter_remote_documents(self):
 		import requests	# pyright: ignore[reportMissingModuleSource]
 
-		documents_yielded = 0
-		cycle = 0
 		with requests.Session() as session:
 			self._configure_http_session(session)
-			while max_documents is None or documents_yielded < max_documents:
-				paths = self._selected_warc_paths(refresh=cycle > 0)
-				remaining = (
-					max_documents - documents_yielded if max_documents is not None else None
-				)
+			while True:
+				if not self._cache_has_capacity():
+					return
+				paths = self._selected_warc_paths(refresh=False)
 				per_warc_limit = self.documents_per_warc
-				if remaining is not None:
-					per_warc_limit = min(per_warc_limit, math.ceil(remaining / len(paths)))
 
 				for path in paths:
-					if max_documents is not None and documents_yielded >= max_documents:
+					if not self._cache_has_capacity():
 						return
 					url = f"https://data.commoncrawl.org/{path.lstrip('/')}"
 					try:
@@ -224,14 +295,88 @@ class CommonCrawlNewsStream:
 									text = self._extract_text(body)
 									if len(text) < self.min_chars:
 										continue
+									if not self._cache_has_capacity():
+										return
 									yield text
-									documents_yielded += 1
 									records_yielded += 1
 									if records_yielded >= per_warc_limit:
 										break
 					except (requests.RequestException, OSError, EOFError, zlib.error) as exc:
 						print(f"Skipping CC-NEWS WARC after retries failed: {path} ({exc})")
-				cycle += 1
+
+	def iter_documents(self, *, max_documents=None):
+		"""Yield cached documents, downloading and caching more in the background."""
+		if max_documents is not None and max_documents < 1:
+			return
+
+		cached_paths = self._cached_document_paths()
+		needs_producer = max_documents is None or len(cached_paths) < max_documents
+		pending = queue.Queue(maxsize=32)
+		stop = threading.Event()
+		producer = None
+
+		def load_documents():
+			try:
+				for text in self._iter_remote_documents():
+					if stop.is_set():
+						return
+					if not self._cache_has_capacity() or not self._cache_document(text):
+						return
+					while not stop.is_set():
+						try:
+							pending.put(text, timeout=0.1)
+							break
+						except queue.Full:
+							continue
+			except Exception as exc:
+				pending.put(exc)
+
+		if needs_producer:
+			producer = threading.Thread(
+				target=load_documents,
+				name=f"commoncrawl-{self.split}-cache",
+				daemon=True,
+			)
+			producer.start()
+
+		yielded = 0
+		seen = set()
+		try:
+			while max_documents is None or yielded < max_documents:
+				paths = self._cached_document_paths()
+				if paths:
+					for path in paths:
+						if max_documents is not None and yielded >= max_documents:
+							return
+						if path.stem in seen:
+							continue
+						try:
+							with self._cache_lock:
+								text = path.read_text(encoding="utf-8")
+						except (OSError, UnicodeError) as exc:
+							print(f"Skipping invalid Common Crawl cache file {path}: {exc}")
+							continue
+						yield text
+						yielded += 1
+						seen.add(path.stem)
+
+				try:
+					result = pending.get(timeout=0.2)
+				except queue.Empty:
+					seen.clear()
+					continue
+				if isinstance(result, Exception):
+					raise result
+				document_id = hashlib.sha256(result.encode("utf-8")).hexdigest()
+				if document_id in seen:
+					continue
+				yield result
+				yielded += 1
+				seen.add(document_id)
+		finally:
+			stop.set()
+			if producer is not None:
+				producer.join(timeout=1)
 
 	@staticmethod
 	def _iter_warc_records(stream):
