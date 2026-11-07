@@ -93,6 +93,7 @@ scaler = None
 pca = None
 
 def fit_scaler(train_data):
+	global scaler
 	if scaler is None:
 		scaler = StandardScaler()
 
@@ -101,6 +102,7 @@ def fit_scaler(train_data):
 def fit_pca(train_data, n_components=25):
 	scaled = scaler.transform(train_data)
 
+	global pca
 	if pca is None:
 		pca = IncrementalPCA(n_components=min(n_components, scaled.shape[1]))
 

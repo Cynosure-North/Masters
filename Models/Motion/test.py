@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from data import chars, MotionDataset
+from data import chars, TestMotionDatset
 
 SEED = 0
 dir_path = Path(r"C:\Users\mno64\Datasets\How we type\Motion Capture")
@@ -155,14 +155,14 @@ def main():
 
 	if True or not save_path.exists():	# noqa: SIM222
 		print("######### Training and testing TCN")
-		TCN.main(train_path, val_path, test_path, save_path)
+		TCN.main(train_path, val_path, test_path, save_path)	# TODO: fix to use TestMotionDatset
 	else:
 		print("######### Testing TCN")
 		tcn = TCN.instantiate_model(save_path).eval()
 		device = next(tcn.parameters()).device
 		loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
 		loader = DataLoader(
-			MotionDataset(test_path),
+			TestMotionDatset(test_path),
 			shuffle=False,
 			collate_fn=TCN.collate_batch,
 			**loader_kwargs)

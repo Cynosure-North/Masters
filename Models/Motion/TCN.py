@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from pathlib import Path
-from data import MotionDataset, chars
+from data import MotionDatset, chars
 
 THREE_DIMENSIONS = False
 
@@ -242,7 +242,7 @@ def test_model(model, dataloader):
 
 def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=None):
 	project_dir = Path(__file__).resolve().parent
-	data_dir = project_dir / "data"
+	data_dir = project_dir / "data" / "training-raw"
 	save_path = _save_path or project_dir / "trained" / "final_TCN.pth"
 	train_path = _train_path or data_dir / "train"
 	validation_path = _validation_path or data_dir / "validation"
@@ -264,11 +264,11 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 
 	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
 	train_dataloader = DataLoader(
-		MotionDataset(train_path), shuffle=True, collate_fn=collate_batch, **loader_kwargs)
+		MotionDatset(train_path), shuffle=True, collate_fn=collate_batch, **loader_kwargs)
 	validation_dataloader = DataLoader(
-		MotionDataset(validation_path), shuffle=False, collate_fn=collate_batch, **loader_kwargs)
+		MotionDatset(validation_path), shuffle=False, collate_fn=collate_batch, **loader_kwargs)
 	test_dataloader = DataLoader(
-		MotionDataset(test_path), shuffle=False, collate_fn=collate_batch, **loader_kwargs)
+		MotionDatset(test_path), shuffle=False, collate_fn=collate_batch, **loader_kwargs)
 	print("data loaded")
 
 	trained_model = train_model(

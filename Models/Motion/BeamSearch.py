@@ -9,7 +9,7 @@ import numpy as np
 from pathlib import Path
 from torch.utils.data import DataLoader
 
-from data import chars, MotionDataset
+from data import chars, TestMotionDatset
 import TCN
 import ref_beamsearch
 
@@ -291,7 +291,7 @@ def run_tuning():
 		device = next(tcn.parameters()).device
 		loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
 		loader = DataLoader(
-			MotionDataset(train_path),
+			TestMotionDatset(train_path),
 			collate_fn=TCN.collate_batch,
 			**loader_kwargs)
 
@@ -403,6 +403,7 @@ def test():
 if __name__ == "__main__":
 	test()
 	
+# TODO: Test beamsearch
 # The final word is often wrong
 # There's one example which is fucked (#8)
 # I'd like if it was faster
