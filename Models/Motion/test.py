@@ -155,14 +155,14 @@ def main():
 
 	if True or not save_path.exists():	# noqa: SIM222
 		print("######### Training and testing TCN")
-		TCN.main(train_path, val_path, test_path, save_path)	# TODO: fix to use TestMotionDatset
+		TCN.main(train_path, val_path, test_path, save_path, test=True)
 	else:
 		print("######### Testing TCN")
 		tcn = TCN.instantiate_model(save_path).eval()
 		device = next(tcn.parameters()).device
 		loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
 		loader = DataLoader(
-			TestMotionDatset(test_path),
+			TestMotionDataset(test_path),
 			shuffle=False,
 			collate_fn=TCN.collate_batch,
 			**loader_kwargs)

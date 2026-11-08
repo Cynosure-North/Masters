@@ -212,7 +212,7 @@ def transform(frames, left_hand, right_hand):
 			hand = left_hand if val[0][0] == 'l' else right_hand
 			result.append(_unwrap_adjustment(frames[idx], val[0], hand.shape, hand.compressibility))
 
-	return result
+	return np.asarray(result)
 
 currently_contacting = []
 displaced_keys = []

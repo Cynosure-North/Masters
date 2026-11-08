@@ -6,7 +6,7 @@
 import csv
 from pathlib import Path
 import numpy as np
-from data import chars, sample_to_vectors, fit_preprocessor, transform, PoseDataset
+from data import chars, frame_to_vectors, fit_preprocessor, transform, PoseDataset
 from torch.utils.data import DataLoader
 import MLP
 
@@ -105,7 +105,7 @@ def random_split(path):
 						continue	 # No button was pressed this frame
 
 					transformed_vectors = np.asarray(
-						sample_to_vectors([row[column] for column in feature_columns]),
+						frame_to_vectors([row[column] for column in feature_columns], test=True),
 						dtype=float )
 
 					if transformed_vectors.size != 30:

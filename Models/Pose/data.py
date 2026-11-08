@@ -93,14 +93,17 @@ scaler = None
 pca = None
 
 def fit_scaler(train_data):
+	vectors = frame_to_vectors(train_data)
+
 	global scaler
 	if scaler is None:
 		scaler = StandardScaler()
 
-	scaler.partial_fit(train_data)
+	scaler.partial_fit(vectors)
 
 def fit_pca(train_data, n_components=25):
-	scaled = scaler.transform(train_data)
+	vectors = frame_to_vectors(train_data)
+	scaled = scaler.transform(vectors)
 
 	global pca
 	if pca is None:
@@ -140,20 +143,24 @@ def load_preprocessor_state(state):
 	pca.explained_variance_ = np.asarray(state["pca"]["explained_variance"], dtype=np.float32)
 	pca.n_features_in_ = len(pca.mean_)
 
-def _pose_adjustment(frame):
+def frame_to_vectors(frame, test=False):
 	if not hasattr(scaler, "mean_"):
 		raise ValueError("Scaler has not been fitted")
 	if not hasattr(pca, "components_"):
 		raise ValueError("PCA has not been fitted")
 
-	# Use the midpoint between the two wrist markers.
-	wrist = (frame[10] + frame[11]) / 2.0
-	finger_pairs = (
-		(frame[0], frame[1]),  # Little
-		(frame[2], frame[3]),  # Ring
-		(frame[4], frame[5]),  # Middle
-		(frame[6], frame[7]),  # Index
-		(frame[8], frame[9]) ) # Thumb
+	if test:
+		# Use the midpoint between the two wrist markers.
+		wrist = (frame[10] + frame[11]) / 2.0
+		finger_pairs = (
+			(frame[0], frame[1]),  # Little
+			(frame[2], frame[3]),  # Ring
+			(frame[4], frame[5]),  # Middle
+			(frame[6], frame[7]),  # Index
+			(frame[8], frame[9]) ) # Thumb
+	else:
+		wrist = frame[0]
+		finger_pairs = None	# TODO: I dont have knuckle positions
 
 	vectors = []
 	for knuckle, fingertip in finger_pairs:
@@ -162,8 +169,11 @@ def _pose_adjustment(frame):
 		mw = wrist - knuckle
 		vectors.append(np.concatenate([mf, mw]))
 
-	vals = np.asarray(vectors, dtype=np.float32).reshape(-1)
-	return pca.transform(scaler.transform(vals))
+	return np.asarray(vectors, dtype=np.float32).reshape(-1)
+
+def _pose_adjustment(frame):
+	# TODO: Need to split it out by hand
+	return pca.transform(scaler.transform(frame_to_vectors(frame)))
 
 def transform(frames):
 	return np.vectorize(_pose_adjustment)(frames)

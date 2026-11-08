@@ -35,56 +35,61 @@ def preprocess():
 				calibration_files = set(surface.glob("calibration_[0-9]*"))
 				sentence_files = [
 					path for path in surface.iterdir()
-					if path.is_file() and path not in calibration_files
-				]
+					if path.is_file() and path not in calibration_files ]
 
 
 				typo_ratios[surface.stem].append(
-					len(list(surface.glob("*_typo"))) / len(sentence_files)
-				)
+					len(list(surface.glob("*_typo"))) / len(sentence_files))
 
 
-				# parse data files
-				# calibrations = []
-				# for c in calibration_files:
-				# 	calibrations.append(ast.literal_eval(c.read_text()))	# Text files were probably not the best decision
+				def parse(files, filename=True):
+					out = []
+					for f in files:
+						record = eval(f.read_text(), {"__builtins__": {}, "array": np.array})
+						frames = np.asarray([frame for _, frame in record])
+						if frames.ndim < 2:
+							# Catches 0-length records
+							print(f"Error on file {f}")
+							continue
 
-				sentences = []
-				for s in sentence_files:
-					# I collected the frame timestamp, but I'm not using it at the moment so only grab the frames
-					record = eval(s.read_text(), {"__builtins__": {}, "array": np.array})
-					frames = np.asarray([frame for _, frame in record])
-					if frames.ndim < 2:
-						# Catches 0-length records
-						print(f"Error on file {s}")
-						continue
-					sentences.append((s.stem, frames[:, 1]))
+						# I collected the frame timestamp, but I'm not using it at the moment so only grab the frames
+						if filename:
+							out.append((f.stem, frames[:, 1]))
+						else:
+							out.append(frames[:, 1])
+					return np.add
+
+				calibrations = parse(calibration_files, filename=False)
+				sentences = parse(sentence_files)
 
 
 				# filter outliers
 				# There were incidents of people accidentally double triggering submit resulting in a <2 frame submission
 				#  and also some situations in which people stopped to ask questions, chat, or take a break
-				# calibration_mean = sum([len(calibration) for calibration in calibrations])/len(calibrations)
-				# calibrations = [x for x in calibrations if (calibration_mean/5 < x and x < calibration_mean*3)]
+				calibration_mean = sum([len(calibration) for calibration in calibrations])/len(calibrations)
+				calibrations = [x for x in calibrations if (calibration_mean/5 < x and x < calibration_mean*3)]
 
 				sentence_mean = sum([len(sentence[1]) for sentence in sentences])/len(sentences)
 				sentences = [x for x in sentences if (sentence_mean/5 < len(x[1]) and len(x[1]) < sentence_mean*3)]
 
-				yield None, sentences, participant, surface
-				# yield calibrations, sentences, participant, surface
+				yield calibrations, sentences, participant, surface
 
 	for calibrations, sentences, participant, surface in file_generator(raw_data_folder):
 
-		# calibrations = np.asarray(calibrations)
+		calibrations = np.asarray(calibrations)
 
-		# left_hand, right_hand = calibrate_hand(calibrations[:, 2:7]), calibrate_hand(calibrations[:, 9:14])
+		left_hand, right_hand = calibrate_hand(calibrations[:, 2:7]), calibrate_hand(calibrations[:, 9:14])
 
 		for sentence, frames in sentences:
 			filename = f"{participant.stem.split('_')[1]}_{sentence}"
 			# pose.fit_scaler(frames)
-			# np.save(contact_data_dir / surface.stem / filename, contact.transform(frames, left_hand, right_hand))
-			# np.save(motion_data_dir / surface.stem / filename, motion.transform(frames, left_hand, right_hand))
-			np.save(motion_data_dir_raw / surface.stem / filename, frames)
+
+			contact_frames = contact.transform(frames, left_hand, right_hand)
+			np.save(contact_data_dir / surface.stem / filename, contact_frames)
+			np.save(contact_data_dir_simple / surface.stem / filename, contact_frames[:, :2])
+
+			np.save(motion_data_dir / surface.stem / filename, motion.transform(frames, left_hand, right_hand))
+			np.save(motion_data_dir_raw / surface.stem / filename, np.diff(frames))
 
 	# for _, sentences, _, _ in file_generator(raw_data_folder):
 	# 	for _, frames in sentences:
@@ -96,13 +101,15 @@ def preprocess():
 	# 		np.save(pose.transform(frames), pose_data_dir / surface / filename)
 	# 		# Scaler and PCA need to be fit on the full training set before transforming the data
 
-	# # Save scaler and PCA values with the data
-	# preprocess_checkpoint = pose.get_preprocessor_state()
-	# np.save(preprocess_checkpoint, pose_data_dir / "preprocessor_params")
+	# Save scaler and PCA values with the data
+	preprocess_checkpoint = pose.get_preprocessor_state()
+	np.save(preprocess_checkpoint, pose_data_dir / "preprocessor_params")
 
 
+	message = "Surface error rations -- "
 	for k, v in typo_ratios.items():
-		print(f"Surface: {k}, ratio: {v}")
+		message += f"{k}: {sum(v) / len(v)} "
+	print(message)
 
 
 if __name__ == "__main__":

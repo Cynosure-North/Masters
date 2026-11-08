@@ -1,6 +1,5 @@
 import gzip
 import hashlib
-import math
 import queue
 import random
 import re
@@ -10,6 +9,7 @@ from datetime import date
 from html.parser import HTMLParser
 from pathlib import Path
 import numpy as np
+from numpy.random import f
 import torch
 import sys
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -64,7 +64,7 @@ class MotionDataset(torch.utils.data.Dataset):
 		return torch.from_numpy(features.astype(np.float32, copy=False)), targets, len(targets)
 
 
-class TestMotionDatset(torch.utils.data.Dataset):
+class TestMotionDataset(torch.utils.data.Dataset):
 	"""Load the flat CSV motion records used by the legacy test dataset."""
 
 	def __init__(self, path):
@@ -610,7 +610,7 @@ class StreamingTextCorpus:
 		self._stop_prefetch.set()
 
 ####################################
-	
+
 def _SDF_adjustment(frame, left_hand, right_hand):
 	frame = np.asarray(frame, dtype=np.float32).reshape(14, 3)
 	adjustments = np.zeros((14, 1), dtype=np.float32)
@@ -622,8 +622,16 @@ def _SDF_adjustment(frame, left_hand, right_hand):
 def transform(frames, left_hand, right_hand):
 	""" for each finger, in each frame report the displacement from that finger to the surface of the corresponding model, and also compressibility"""
 	func = lambda l: _SDF_adjustment(l, left_hand, right_hand)
-	return np.vectorize(func)(frames)	
+	return np.diff(np.vectorize(func)(frames))
 
 
+prev_frame = None
 def interactive_transform(frame, left_hand, right_hand):
-	_SDF_adjustment(frame, left_hand, right_hand)
+	adjusted_frame = _SDF_adjustment(frame, left_hand, right_hand)
+
+	if prev_frame is None:
+		prev_frame = adjusted_frame
+	else:
+		frame_delta = adjusted_frame - prev_frame
+		prev_frame = adjusted_frame
+		return frame_delta
