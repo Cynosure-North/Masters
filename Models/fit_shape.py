@@ -56,8 +56,8 @@ class Hand:
 	# whether it's 2d or 3d
 	shape: SurfaceFit
 	compressibility: float
-	rest_point: np.ndarray
-	rest_uv: np.ndarray
+	rest_point: np.ndarray	# Average hand position in 3d space during calibration (where on the surface to put the keyboard)
+	rest_uv: np.ndarray	# Average hand position on the surface surface during calibration
 
 # IDEA: The models don't get the global surface topology, could be good future work
 
@@ -524,8 +524,6 @@ def calibrate_hand(frames: np.ndarray) -> Hand:
 			return 0.0, 20	# even on hard surfaces fingers have some squish of their own
 		return max_compression, end_of_compression
 
-	frames = frames[:, :5, :]		# discard wrist + knuckles
-
 	reference = np.mean(frames[:60], axis=0)
 	compressibility, end_index = compressibility(reference, frames[70:190])
 	contact_samples = frames[70 + end_index + 10:].reshape(-1, 3)
@@ -536,6 +534,8 @@ def calibrate_hand(frames: np.ndarray) -> Hand:
 	rest_point = np.mean(contact_samples, axis=0)
 	rest_point = rest_point + signed_distance_to_surface(rest_point, shape_fit)
 	rest_uv = surface_uv(rest_point, shape_fit)
+
 	return Hand(shape_fit, compressibility, rest_point, rest_uv)
+
 	# TODO: This is going to need a lot of work, Some participants are just squeezing for the cushion, and on the pipe and table it's much closer to sliding.
 	# Perhaps a factor could be if there's a clear peak in compression rather than a continuous increase in distance from the reference point

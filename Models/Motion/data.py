@@ -616,7 +616,7 @@ def _SDF_adjustment(frame, left_hand, right_hand):
 	adjustments = np.zeros((14, 1), dtype=np.float32)
 	for idx, point in enumerate(frame):
 		hand = left_hand if idx < 8 else right_hand
-		adjustments[idx] = [signed_distance_to_surface(point, hand.shape), hand.compressibility]
+		adjustments[idx] = [signed_distance_to_surface(point, hand.shape), hand.compressibility, hand.rest_point]
 	return np.concatenate((frame,adjustments), axis=-1)
 
 def transform(frames, left_hand, right_hand):

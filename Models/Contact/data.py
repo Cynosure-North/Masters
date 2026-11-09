@@ -161,14 +161,6 @@ finger_idxs = {
 	"r_ring": 11,
 	"r_little": 12}
 
-def _unwrap_adjustment(frame, finger, surface, compressibility):
-	""" return [uv, normal, principal curvatures, compressibility]"""
-	point = frame[finger_idxs[finger]]
-	uv = surface_uv(point, surface)
-	# normal, tangent_u, tangent_v, curvature_0, curvature_1
-	res = principal_curvature_frame(point, surface)
-	return np.concatenate((uv, res, [compressibility]))
-
 def _first_touching_frames(frames, left_hand, right_hand):
 	""" Identify the first frame of each finger press """
 	# CONCERN: I may need debouncing
@@ -200,6 +192,15 @@ def _first_touching_frames(frames, left_hand, right_hand):
 
 	return contacting
 
+
+def _unwrap_adjustment(frame, finger, surface, compressibility, rest_uv):
+	""" return [uv, normal, principal curvatures, compressibility]"""
+	point = frame[finger_idxs[finger]]
+	uv = surface_uv(point, surface)
+	# normal, tangent_u, tangent_v, curvature_0, curvature_1
+	res = principal_curvature_frame(point, surface)
+	return np.concatenate((uv, [rest_uv, compressibility], res))
+
 def transform(frames, left_hand, right_hand):
 	result = []
 
@@ -210,7 +211,7 @@ def transform(frames, left_hand, right_hand):
 			raise ValueError("Only one contact point per frame")
 		else:
 			hand = left_hand if val[0][0] == 'l' else right_hand
-			result.append(_unwrap_adjustment(frames[idx], val[0], hand.shape, hand.compressibility))
+			result.append(_unwrap_adjustment(frames[idx], val[0], hand.shape, hand.compressibility, hand.rest_uv))
 
 	return np.asarray(result)
 
