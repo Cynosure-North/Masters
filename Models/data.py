@@ -80,7 +80,11 @@ def preprocess():
 		calibrations = np.asarray(calibrations)
 
 		# Each hand is calibrated based on the fingertip positions
-		left_hand, right_hand = calibrate_hand(calibrations[:, 2:7]), calibrate_hand(calibrations[:, 9:14])
+		try:
+			left_hand, right_hand = calibrate_hand(calibrations[:, :7]), calibrate_hand(calibrations[:, 7:])
+		except:
+			print(f"Error calibrating {participant}/{surface}")
+			raise
 
 		for sentence, frames in sentences:
 			filename = f"{participant.stem.split('_')[1]}_{sentence}"

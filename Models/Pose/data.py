@@ -160,7 +160,7 @@ def frame_to_vectors(frame, test=False):
 			(frame[8], frame[9]) ) # Thumb
 	else:
 		wrist = frame[0]
-		finger_pairs = None	# TODO: I dont have knuckle positions
+		finger_pairs = None	# TODO: I forgot to record knuckle positions...
 
 	vectors = []
 	for knuckle, fingertip in finger_pairs:

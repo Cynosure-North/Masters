@@ -153,7 +153,7 @@ def main():
 	llm_path = project_dir / "trained" / "final_LLM.pth"
 	save_path = project_dir / "trained" / "test_TCN.pth"
 
-	if True or not save_path.exists():	# noqa: SIM222
+	if True or not save_path.exists():
 		print("######### Training and testing TCN")
 		TCN.main(train_path, val_path, test_path, save_path, test=True)
 	else:

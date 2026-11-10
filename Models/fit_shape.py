@@ -48,17 +48,6 @@ class RbfSurfaceFit:
 
 SurfaceFit = PlaneFit | EllipsoidFit | ConeFit | CylinderFit | RbfSurfaceFit
 
-@dataclass(frozen=True)
-class Hand:
-	# CONCERN: I'm unsure how the motion model will work with a split setup
-	# NOTE: Even for plane fits, it's still good to use the plane SDF rather than just the 2d
-	# implementation, so I can handle angled planes. So the pipeline is the same regardless of
-	# whether it's 2d or 3d
-	shape: SurfaceFit
-	compressibility: float
-	rest_point: np.ndarray	# Average hand position in 3d space during calibration (where on the surface to put the keyboard)
-	rest_uv: np.ndarray	# Average hand position on the surface surface during calibration
-
 # IDEA: The models don't get the global surface topology, could be good future work
 
 
@@ -76,7 +65,7 @@ def _validate_samples(points: np.ndarray, min_samples: int=3, max_samples: int=5
 		raise ValueError("points must contain only finite values")
 	return samples
 
-def signed_distance_to_surface(
+def vector_to_surface(
 	point: np.ndarray,
 	surface: SurfaceFit,
 ) -> np.ndarray:
@@ -174,7 +163,7 @@ def fit_surface(points: np.ndarray) -> SurfaceFit:
 		(
 			surface,
 			np.sqrt(np.mean([
-				np.linalg.norm(signed_distance_to_surface(point, surface)) ** 2 for point in samples
+				np.linalg.norm(vector_to_surface(point, surface)) ** 2 for point in samples
 			]))
 		)
 		for surface in fits
@@ -511,31 +500,3 @@ def principal_curvature_frame(point: np.ndarray, surface):
 		principal_v = np.asarray(surface.rotation[:, 1], dtype=np.float32)
 		return normal, principal_u, principal_v, curvatures[0], curvatures[1]
 	return normal, tangent_u, tangent_v, curvatures[0], curvatures[1]
-
-
-def calibrate_hand(frames: np.ndarray) -> Hand:
-	def compressibility(reference_points, subsequent_frames):
-		framewise_displacement = np.mean(subsequent_frames - reference_points, axis=(1, 2))
-		max_compression_index = int(np.argmax(framewise_displacement))
-		max_compression = float(framewise_displacement[max_compression_index])
-		end_of_compression = int(np.argmin(framewise_displacement[max_compression_index:]))
-
-		if max_compression < 0.2:
-			return 0.0, 20	# even on hard surfaces fingers have some squish of their own
-		return max_compression, end_of_compression
-
-	reference = np.mean(frames[:60], axis=0)
-	compressibility, end_index = compressibility(reference, frames[70:190])
-	contact_samples = frames[70 + end_index + 10:].reshape(-1, 3)
-	if contact_samples.size == 0:
-		contact_samples = frames.reshape(-1, 3)
-	shape_fit = fit_surface(contact_samples)
-
-	rest_point = np.mean(contact_samples, axis=0)
-	rest_point = rest_point + signed_distance_to_surface(rest_point, shape_fit)
-	rest_uv = surface_uv(rest_point, shape_fit)
-
-	return Hand(shape_fit, compressibility, rest_point, rest_uv)
-
-	# TODO: This is going to need a lot of work, Some participants are just squeezing for the cushion, and on the pipe and table it's much closer to sliding.
-	# Perhaps a factor could be if there's a clear peak in compression rather than a continuous increase in distance from the reference point

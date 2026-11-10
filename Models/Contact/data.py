@@ -4,7 +4,7 @@ import numpy as np
 import csv
 import sys
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-from fit_shape import signed_distance_to_surface, surface_uv, principal_curvature_frame
+from fit_shape import vector_to_surface, surface_uv, principal_curvature_frame
 
 SEED = 0
 
@@ -172,7 +172,7 @@ def _first_touching_frames(frames, left_hand, right_hand):
 			point = frame[finger_idx]
 
 			hand = left_hand if finger_idx < 8 else right_hand
-			distance_vector = signed_distance_to_surface(point, hand.shape)
+			distance_vector = vector_to_surface(point, hand.shape)
 			if np.linalg.norm(distance_vector) <= 1e-6:
 				contacting[frame_idx].append(finger)
 
@@ -224,7 +224,7 @@ def interactive_transform(frame, left_hand, right_hand):
 	for finger, (finger_idx, hand) in finger_idxs.items():
 		point = frame[finger_idx]
 		hand = left_hand if finger_idx < 8 else right_hand
-		distance_vector = signed_distance_to_surface(point, hand.shape)
+		distance_vector = vector_to_surface(point, hand.shape)
 		if np.linalg.norm(distance_vector) <= 1e-6:
 			contacting.append(finger)
 		elif finger in currently_contacting:

@@ -215,12 +215,12 @@ distal_lengths = {		# NOTE: Needs to measured and calibrated for each user
 	"r_index": 0.025,
 	"r_middle": 0.025,
 	"r_ring": 0.025,
-	"r_pinky": 0.020,
+	"r_little": 0.020,
 	"l_thumb": 0.035,
 	"l_index": 0.025,
 	"l_middle": 0.025,
 	"l_ring": 0.025,
-	"l_pinky": 0.020,
+	"l_little": 0.020,
 }
 
 def fingertip_from_bones(
@@ -297,7 +297,7 @@ def frame_point_array(frame: DataFrame, description: DataDescriptions, origin: n
 				return None
 
 			rigid_bodies = hand.rigid_bodies
-			root, thumb, index, middle, ring, pinky = \
+			root, thumb, index, middle, ring, little = \
 				rigid_bodies[0], rigid_bodies[3], rigid_bodies[6], \
 				rigid_bodies[9], rigid_bodies[12], rigid_bodies[15]
 			wrist_point, wrist_vector = nearest_wrist_marker(
@@ -311,12 +311,12 @@ def frame_point_array(frame: DataFrame, description: DataDescriptions, origin: n
 					distal_lengths[f"{hand_name[0]}_{name.lower()}"],
 				)
 				for name, finger in zip(
-					("Thumb", "Index", "Middle", "Ring", "Pinky"),
-					[thumb, index, middle, ring, pinky]
+					("Thumb", "Index", "Middle", "Ring", "Little"),
+					[thumb, index, middle, ring, little]
 				)
 			]
 			points += [wrist_point, wrist_vector, *fingertips]
-	except Exception as e:	# noqa: BLE001
+	except Exception as e:
 		print(f"Error processing frame {frame.prefix.frame_number}: {e}")
 		return None
 
