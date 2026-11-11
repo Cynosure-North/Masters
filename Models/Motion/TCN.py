@@ -255,9 +255,6 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 		model = TCN(input_features=73)
 		save_path = save_path.with_stem(f"{save_path.stem}_3d")
 
-		# IDEA: It could also be good to test the motion model with only the 3d motion data and none of the surface data
-		# It would be more robust and may work just as well if the model focuses on reversals of finger velocity
-
 	if save_path.exists():
 		model = instantiate_model(save_path)
 		print("loaded saved weights")

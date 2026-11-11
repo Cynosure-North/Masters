@@ -49,7 +49,7 @@ from data import PoseDataset
 
 def interactive():
 	pass
-	# TODO: Interactive mode for pose
+	# todo: Interactive mode for pose
 	# On contact:
 	# 	models[hand](data.transform(input_data))
 

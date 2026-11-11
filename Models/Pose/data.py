@@ -153,17 +153,17 @@ def frame_to_vectors(frame, test=False):
 		# Use the midpoint between the two wrist markers.
 		wrist = (frame[10] + frame[11]) / 2.0
 		finger_pairs = (
-			(frame[0], frame[1]),  # Little
-			(frame[2], frame[3]),  # Ring
-			(frame[4], frame[5]),  # Middle
-			(frame[6], frame[7]),  # Index
-			(frame[8], frame[9]) ) # Thumb
+			(frame[0], frame[1], wrist),  # Little
+			(frame[2], frame[3], wrist),  # Ring
+			(frame[4], frame[5], wrist),  # Middle
+			(frame[6], frame[7], wrist),  # Index
+			(frame[8], frame[9], wrist) ) # Thumb
 	else:
-		wrist = frame[0]
-		finger_pairs = None	# TODO: I forgot to record knuckle positions...
+		wrist_l, wrist_r = frame[0], frame[7]
+		finger_pairs = None	# todo: I forgot to record knuckle positions...
 
 	vectors = []
-	for knuckle, fingertip in finger_pairs:
+	for knuckle, fingertip, wrist in finger_pairs:
 		# MF points from the knuckle to the fingertip; MW points to the wrist.
 		mf = fingertip - knuckle
 		mw = wrist - knuckle
@@ -172,7 +172,6 @@ def frame_to_vectors(frame, test=False):
 	return np.asarray(vectors, dtype=np.float32).reshape(-1)
 
 def _pose_adjustment(frame):
-	# TODO: Need to split it out by hand
 	return pca.transform(scaler.transform(frame_to_vectors(frame)))
 
 def transform(frames):

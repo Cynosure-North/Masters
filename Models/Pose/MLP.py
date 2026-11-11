@@ -238,11 +238,6 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 		model = PoseMLP(layers=2)
 		save_path = save_path.with_stem(f"{save_path.stem}_3d")
 
-		# https://karpathy.github.io/2019/04/25/recipe/
-		#
-		# I'll probably want to increase the number of neurons/layers compared to the 2d one
-		# I can test and see how it goes
-
 	if save_path.exists():
 		model.load_state_dict(torch.load(save_path, weights_only=True, map_location="cpu"))
 		print("loaded saved weights")

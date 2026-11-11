@@ -284,8 +284,6 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 		# Alternatively, I could chunk it
 		# (unclear how they do it in the paper)
 
-		# IDEA: I could train the model only using UV coordinates
-
 	if save_path.exists():
 		model = instantiate_model(save_path)
 		print("loaded saved weights")

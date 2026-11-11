@@ -334,7 +334,7 @@ def train_model(
 
 			batch_loss = loss.detach().item()
 
-			if batch_count % 500 == 0: print(f"batch {batch_count:<6n} of epoch {epoch:<3n} finished -- loss: {batch_loss:.4f}")
+			if batch_count % 500 == 0: print(f"batch {batch_count:<6n} of epoch {epoch} finished -- loss: {batch_loss:.4f}")
 			if checkpoint_path is not None and batch_count % checkpoint_interval == 0:
 				checkpoint = checkpoint_path.with_stem(f"{checkpoint_path.stem}_{epoch}_{batch_count // checkpoint_interval}")
 				save_checkpoint(model, checkpoint)

@@ -163,7 +163,7 @@ finger_idxs = {
 
 def _first_touching_frames(frames, left_hand, right_hand):
 	""" Identify the first frame of each finger press """
-	# CONCERN: I may need debouncing
+	# FIXME: I may need debouncing
 
 	contacting = np.asarray([[]] * len(frames), dtype=object)
 	frames = np.asarray(frames).reshape(-1, 54, 3)
