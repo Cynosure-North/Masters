@@ -77,10 +77,14 @@ def interactive(tnn, llm):
 
 def main():
 	print("######### Training LLM")
-	LLM.main(50_000)
+	LLM.main(steps=50_000)
 
 	print("######### Training TCN")
-	TCN.main()
+	TCN.main(variant="")
+	print("######### Training TCN (3d-raw)")
+	TCN.main(variant="3d-raw")
+	print("######### Training TCN (3d)")
+	TCN.main(variant="3d")
 
 	print("######### Tuning Beam Search")
 	BeamSearch.run_tuning()

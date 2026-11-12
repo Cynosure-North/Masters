@@ -267,14 +267,14 @@ def test_model(
 	accuracy = total_correct / total_count if total_count else 0.0
 	return total_loss / batch_count, accuracy
 
-def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=None):
+def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=None, variant=VARIANT):
 	project_dir = Path(__file__).resolve().parent
 	save_path = _save_path or project_dir / "trained" / "final_BiGRU.pth"
-	data_dir = project_dir / "data" / VARIANT or "geometric"
+	data_dir = project_dir / "data" / (variant or "geometric")
 
 	loader_kwargs = {"batch_size": 64, "collate_fn": pad_variable, "num_workers": 2, "pin_memory": True}
 
-	if not VARIANT:
+	if not variant:
 		model = instantiate_model(save_path)
 
 		train_path = _train_path or data_dir / "train.csv"
@@ -286,17 +286,17 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 		test_dataloader = DataLoader(TestGeometricDataset(test_path), shuffle=False, **loader_kwargs)
 		print("data loaded")
 	else:
-		save_path = save_path.with_stem(f"{save_path.stem}_{VARIANT}")
+		save_path = save_path.with_stem(f"{save_path.stem}_{variant}")
 
-		if "simple" in VARIANT:
+		if "simple" in variant:
 			model = instantiate_model(save_path, input_size=3)
 		else:
 			# Input is [uv, normal, tangent vectors, principal curvatures, compressibility] instead of [x, y]
 			model = instantiate_model(save_path, input_size=16, num_layers=3)
 
-		train_path = _train_path or data_dir / VARIANT / "train"
-		validation_path = _validation_path or data_dir / VARIANT / "validation"
-		test_path = _test_path or data_dir / VARIANT / "test"
+		train_path = _train_path or data_dir / variant / "train"
+		validation_path = _validation_path or data_dir / variant / "validation"
+		test_path = _test_path or data_dir / variant / "test"
 
 		train_dataloader = DataLoader(TestGeometricDataset(train_path), shuffle=True, **loader_kwargs)
 		validation_dataloader = DataLoader(TestGeometricDataset(validation_path), shuffle=False, **loader_kwargs)

@@ -97,13 +97,21 @@ def interactive():
 def train():
 	"""Train the component models before fine-tuning the complete SANCD model."""
 	print("######### Training BiGRU")
-	BiGRU.main()
+	BiGRU.main(variant="")
+	print("######### Training BiGRU (3d-simple)")
+	BiGRU.main(variant="3d-simple")
+	print("######### Training BiGRU (3d)")
+	BiGRU.main(variant="3d")
 
 	print("######### Training BERT")
 	BERT.main()
 
 	print("######### Training SANCD")
-	SANCD.main()
+	SANCD.main(variant="")
+	print("######### Training SANCD (3d-simple)")
+	SANCD.main(variant="3d-simple")
+	print("######### Training SANCD (3d)")
+	SANCD.main(variant="3d")
 
 
 if __name__ == "__main__":
