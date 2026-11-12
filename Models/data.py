@@ -1,6 +1,5 @@
 """Parse the raw data from the experiment, apply the relevant processing for each model, and save it to that model's data dir"""
 
-import random
 from pathlib import Path
 import numpy as np
 from calibration import calibrate_hand
@@ -8,8 +7,6 @@ import Pose.data as pose
 import Contact.data as contact
 import Motion.data as motion
 
-SEED = 0
-rand = random.Random(SEED)
 
 raw_data_folder = Path(r"H:\Research_Data\Morgana North(MHIT)\phase1")
 models_root = Path(__file__).resolve().parent 
@@ -24,8 +21,8 @@ cache_dir.mkdir(exist_ok=True)
 typo_ratios = {"table": [], "cushion": [], "pipe": [], "legs": []}
 
 def file_generator(data_folder):
-	for participant in sorted(data_folder.iterdir()):
-		for surface in sorted(participant.iterdir()):
+	for participant in data_folder.iterdir():
+		for surface in participant.iterdir():
 
 			if surface.is_file():
 				continue
@@ -40,7 +37,7 @@ def file_generator(data_folder):
 
 			calibration_files = set(surface.glob("calibration_[0-9]*"))
 			sentence_files = [
-				path for path in sorted(surface.iterdir())
+				path for path in surface.iterdir()
 				if path.is_file() and path not in calibration_files and "_typo" not in path.stem]
 
 
@@ -108,15 +105,15 @@ def preprocess():
 			# pose.fit_scaler(frames)
 			
 			split = ["validation", "test", "validation", "test", "validation", "test",
-			 "train", "train", "train", "train", "train"][rand.randint(0,9)]
+			 "train", "train", "train", "train", "train"][hash(filename) % 10]
 
 			if (contact_data_dir / surface / split / filename).exists():
-				print(f"Skipping existing file: {filename}")
+				print(f"Skipping existing file: {surface}/{split}/{filename}")
 				continue
 				# It's fairly unlikely the code will get interrupted in between save statements
 				# and if it does and one or two files aren't saved as training data it's not a huge
 				# deal, so only checking one file is fine
-			print(f"Processing {filename}")
+			print(f"Processing {surface}/{split}/{filename}")
 
 			contact_frames = contact.transform(frames, left_hand, right_hand)
 			np.save(contact_data_dir / surface / split / filename, contact_frames)

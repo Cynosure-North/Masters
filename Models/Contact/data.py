@@ -236,10 +236,13 @@ def _first_touching_frames(frames, left_hand, right_hand):
 	for i in range(1, len(frames)-1):
 		if len(contacting[i]) > 1:
 			buffered_frames += 1
-			if len(contacting[i-1]) == 0 or len(contacting[i+1]) == 0:
-				contacting[i-1].append(contacting[i].pop())
-			else:
-				raise BufferError("Can't displace keypress")
+			while len(contacting[i]) > 1:
+				if len(contacting[i-1]) == 0:
+					contacting[i-1].append(contacting[i].pop())
+				elif len(contacting[i+1]) == 0:
+					contacting[i+1].append(contacting[i].pop())
+				else:
+					raise BufferError("Can't displace keypress")
 
 	print(f"contacting frames: {contacting_frames}")
 	print(f"buffered frames: {buffered_frames}")
