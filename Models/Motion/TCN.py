@@ -2,9 +2,10 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from pathlib import Path
+from Models.Contact.BiGRU import VARIANT
 from data import TestMotionDataset, MotionDataset, chars
 
-THREE_DIMENSIONS = False
+VARIANT = "3d-raw"
 
 class ResidualTCNBlock(torch.nn.Module):
 	def __init__(self, in_channels, out_channels, kernel_size=2, dilation=3):
@@ -105,11 +106,12 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 			if candidate.is_file() and candidate.suffix == ".pth" and candidate.name.startswith(cleanup_previous.stem):
 				candidate.unlink()
 
-def instantiate_model(model_path):
+def instantiate_model(model_path, **kwargs):
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model_path = Path(model_path)
 	if not model_path.exists():
-		raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
+		print(f"Model checkpoint not found: {model_path}, instantiating new model")
+		return TCN(**kwargs)
 
 	checkpoint = torch.load(model_path, map_location=device, weights_only=False)
 	config = checkpoint["model_config"]
@@ -124,6 +126,8 @@ def instantiate_model(model_path):
 	model.load_state_dict(checkpoint["model_state_dict"], strict=True)
 	model.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 	model.scaler.load_state_dict(checkpoint["scaler_state_dict"])
+
+	print("loaded model from saved weights")
 	
 	return model
 
@@ -244,36 +248,39 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	project_dir = Path(__file__).resolve().parent
 	data_dir = project_dir / "data" / "training-raw"
 	save_path = _save_path or project_dir / "trained" / "final_TCN.pth"
-	train_path = _train_path or data_dir / "train"
-	validation_path = _validation_path or data_dir / "validation"
-	test_path = _test_path or data_dir / "test"
-
-	if not THREE_DIMENSIONS:
-		model = TCN()
-	else:
-		# Adds in a vector pointing from each fingertip to the nearest surface point, and also compressibility
-		model = TCN(input_features=73)
-		save_path = save_path.with_stem(f"{save_path.stem}_3d")
-
-	if save_path.exists():
-		model = instantiate_model(save_path)
-		print("loaded saved weights")
 
 	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
-	if not test:
-		train_dataloader = DataLoader(
-			MotionDataset(train_path), shuffle=True, collate_fn=collate_batch, **loader_kwargs)
-		validation_dataloader = DataLoader(
-			MotionDataset(validation_path), shuffle=False, collate_fn=collate_batch, **loader_kwargs)
-		test_dataloader = DataLoader(
-			MotionDataset(test_path), shuffle=False, collate_fn=collate_batch, **loader_kwargs)
-	else:
+	if not VARIANT:
+		model = instantiate_model(save_path)
+
+		train_path = _train_path or data_dir / "train"
+		validation_path = _validation_path or data_dir / "validation"
+		test_path = _test_path or data_dir / "test"
+
 		train_dataloader = DataLoader(
 			TestMotionDataset(train_path), shuffle=True, collate_fn=collate_batch, **loader_kwargs)
 		validation_dataloader = DataLoader(
 			TestMotionDataset(validation_path), shuffle=False, collate_fn=collate_batch, **loader_kwargs)
 		test_dataloader = DataLoader(
 			TestMotionDataset(test_path), shuffle=False, collate_fn=collate_batch, **loader_kwargs)
+	else:
+		save_path = save_path.with_stem(f"{save_path.stem}_{VARIANT}")
+		if "raw" in VARIANT:
+			model = instantiate_model(save_path)
+		else:
+			# Adds in a vector pointing from each fingertip to the nearest surface point, and also compressibility
+			model = instantiate_model(save_path, input_features=73)
+
+		train_path = _train_path or data_dir / VARIANT / "train"
+		validation_path = _validation_path or data_dir / VARIANT / "validation"
+		test_path = _test_path or data_dir / VARIANT / "test"
+
+		train_dataloader = DataLoader(
+			MotionDataset(train_path), shuffle=True, collate_fn=collate_batch, **loader_kwargs)
+		validation_dataloader = DataLoader(
+			MotionDataset(validation_path), shuffle=False, collate_fn=collate_batch, **loader_kwargs)
+		test_dataloader = DataLoader(
+			MotionDataset(test_path), shuffle=False, collate_fn=collate_batch, **loader_kwargs)
 		
 	print("data loaded")
 

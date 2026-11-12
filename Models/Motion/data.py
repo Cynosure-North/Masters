@@ -37,8 +37,7 @@ class MotionDataset(torch.utils.data.Dataset):
 
 		self.files = sorted(
 			file_path for file_path in self.path.rglob("*.npy")
-			if not file_path.stem.endswith("_typo")
-		)
+			if not file_path.stem.endswith("_typo"))
 		if not self.files:
 			raise ValueError(f"Motion dataset directory is empty: {self.path}")
 
@@ -50,8 +49,7 @@ class MotionDataset(torch.utils.data.Dataset):
 		_, separator, label = file_path.stem.partition("_")
 		if not separator or not label:
 			raise ValueError(
-				f"Motion record filename must contain a participant and label: {file_path}"
-			)
+				f"Motion record filename must contain a participant and label: {file_path}")
 		label = label.lower()
 		if any(char not in chars for char in label):
 			raise ValueError(f"Motion record has an invalid label: {file_path}")

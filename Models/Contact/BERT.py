@@ -166,11 +166,12 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 				candidate.unlink()
 
 
-def instantiate_model(model_path):
+def instantiate_model(model_path, **kwargs):
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model_path = Path(model_path)
 	if not model_path.exists():
-		raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
+		print(f"Model checkpoint not found: {model_path}, instantiating new model")
+		return CharBERTForMLM(**kwargs)
 
 	checkpoint = torch.load(model_path, map_location=device, weights_only=False)
 	config = checkpoint["model_config"]
@@ -186,6 +187,8 @@ def instantiate_model(model_path):
 	model.load_state_dict(checkpoint["model_state_dict"], strict=True)
 	model.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 	model.scaler.load_state_dict(checkpoint["scaler_state_dict"])
+
+	print("loaded model from saved weights")
 
 	return model
 
@@ -415,11 +418,7 @@ def main():
 	project_dir = Path(__file__).resolve().parent
 	save_path = project_dir / "trained" / "final_BERT.pth"
 
-	if save_path.exists():
-		model = instantiate_model(save_path)
-		print("loaded saved weights")
-	else:
-		model = CharBERTForMLM()
+	model = instantiate_model(save_path)
 	tokenizer = CharTokenizer()
 
 	train_dataset = MaskedDataset(train=True, tokenizer=tokenizer, max_length=model.pos_embedding.num_embeddings)

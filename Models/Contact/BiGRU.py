@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from pathlib import Path
-from data import chars, pad_variable, GeometricDataset
+from data import chars, pad_variable, TestGeometricDataset
 
 SEED = 0
-THREE_DIMENSIONS = False
+VARIANT = "3d-simple"
 
 def augment_coordinates(data, generator, *, jitter_pixels=3.0, noise_std=0.01, p=0.5):
 	"""Apply coordinate jitter and gaussian noise"""
@@ -82,11 +82,12 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 
 
 
-def instantiate_model(model_path):
+def instantiate_model(model_path, **kwargs):
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model_path = Path(model_path)
 	if not model_path.exists():
-		raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
+		print(f"Model checkpoint not found: {model_path}, instantiating new model")
+		return BiGRU(**kwargs)
 
 	checkpoint = torch.load(model_path, map_location=device, weights_only=False)
 	config = checkpoint["model_config"]
@@ -100,6 +101,8 @@ def instantiate_model(model_path):
 	model.load_state_dict(checkpoint["model_state_dict"], strict=True)
 	model.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 	model.scaler.load_state_dict(checkpoint["scaler_state_dict"])
+
+	print("loaded model from saved weights")
 	
 	return model
 
@@ -267,31 +270,38 @@ def test_model(
 def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=None):
 	project_dir = Path(__file__).resolve().parent
 	save_path = _save_path or project_dir / "trained" / "final_BiGRU.pth"
-	data_dir = project_dir / "data" / "geometric"
-	train_path = _train_path or data_dir / "train.csv"
-	validation_path = _validation_path or data_dir / "validation.csv"
-	test_path = _test_path or data_dir / "test.csv"
-
-	if not THREE_DIMENSIONS:
-		model = BiGRU()
-	else:
-		# Input is [uv, normal, tangent vectors, principal curvatures, compressibility] instead of [x, y]
-		model = BiGRU(input_size=16, num_layers=3)
-		save_path = save_path.with_stem(f"{save_path.stem}_3d")
-
-		# TODO: BiGRU won't work for streaming
-		# I could use regular GRU (but apparently there's a risk of instability accumulation, although that can be solved https://share.google/aimode/BMVym80p0icBDVlF5)
-		# Alternatively, I could chunk it
-		# (unclear how they do it in the paper)
-
-	if save_path.exists():
-		model = instantiate_model(save_path)
-		print("loaded saved weights")
+	data_dir = project_dir / "data" / VARIANT or "geometric"
 
 	loader_kwargs = {"batch_size": 64, "collate_fn": pad_variable, "num_workers": 2, "pin_memory": True}
-	train_dataloader = DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)
-	validation_dataloader = DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)
-	test_dataloader = DataLoader(GeometricDataset(test_path), shuffle=False, **loader_kwargs)
+
+	if not VARIANT:
+		model = instantiate_model(save_path)
+
+		train_path = _train_path or data_dir / "train.csv"
+		validation_path = _validation_path or data_dir / "validation.csv"
+		test_path = _test_path or data_dir / "test.csv"
+
+		train_dataloader = DataLoader(TestGeometricDataset(train_path), shuffle=True, **loader_kwargs)
+		validation_dataloader = DataLoader(TestGeometricDataset(validation_path), shuffle=False, **loader_kwargs)
+		test_dataloader = DataLoader(TestGeometricDataset(test_path), shuffle=False, **loader_kwargs)
+		print("data loaded")
+	else:
+		save_path = save_path.with_stem(f"{save_path.stem}_{VARIANT}")
+
+		if "simple" in VARIANT:
+			model = instantiate_model(save_path, input_size=3)
+		else:
+			# Input is [uv, normal, tangent vectors, principal curvatures, compressibility] instead of [x, y]
+			model = instantiate_model(save_path, input_size=16, num_layers=3)
+
+		train_path = _train_path or data_dir / VARIANT / "train"
+		validation_path = _validation_path or data_dir / VARIANT / "validation"
+		test_path = _test_path or data_dir / VARIANT / "test"
+
+		train_dataloader = DataLoader(TestGeometricDataset(train_path), shuffle=True, **loader_kwargs)
+		validation_dataloader = DataLoader(TestGeometricDataset(validation_path), shuffle=False, **loader_kwargs)
+		test_dataloader = DataLoader(TestGeometricDataset(test_path), shuffle=False, **loader_kwargs)
+
 	print("data loaded")
 
 	trained_model = train_model(

@@ -5,9 +5,10 @@ from pathlib import Path
 
 import BiGRU
 import BERT
-from data import GeometricDataset, pad_variable
+from data import TestGeometricDataset, pad_variable
 
 SEED = 0
+VARIANT = "3d-simple"
 
 class SANCD(nn.Module):
 	def __init__(self, bigru_path, bert_path, confidence_threshold=0.45):
@@ -67,11 +68,12 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 			if candidate.is_dir() and candidate.name.startswith(cleanup_previous.name):
 				candidate.rmdir()
 
-def instantiate_model(model_path):
+def instantiate_model(model_path, **kwargs):
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model_path = Path(model_path)
 	if not model_path.exists():
-		raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
+		print(f"Model checkpoint not found: {model_path}, instantiating new model")
+		return SANCD(**kwargs)
 
 	checkpoint = torch.load(model_path / "SANCD.pth", map_location=device, weights_only=False)
 	model = SANCD(
@@ -79,6 +81,8 @@ def instantiate_model(model_path):
 		model_path / "BERT.pth",
 		confidence_threshold=checkpoint["model_config"]["confidence_threshold"]
 	).to(device)
+
+	print("loaded model from saved weights")
 	
 	return model
 
@@ -236,20 +240,32 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _bigru_path=N
 	bigru_path = _bigru_path or project_dir / "trained" / "final_BiGRU.pth"
 	bert_path = project_dir / "trained" / "best_BERT.pth"
 	save_path = _save_path or project_dir / "trained" / "final_SANCD"
-	data_dir = project_dir / "data" / "geometric"
-	train_path = _train_path or data_dir / "train.csv"
-	validation_path = _validation_path or data_dir / "validation.csv"
-	test_path = _test_path or data_dir / "test.csv"
-
-	if save_path.exists():
-		model = instantiate_model(save_path)
-		print("loaded saved weights")
-	else:
-		model = SANCD(bigru_path=bigru_path, bert_path=bert_path)
+	data_dir = project_dir / "data" / VARIANT or "geometric"
 
 	loader_kwargs = { "batch_size": 64, "collate_fn": pad_variable, "num_workers": 2, "pin_memory": True }
-	train_dataloader = DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)
-	validation_dataloader = DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)
+
+	if not VARIANT:
+		train_path = _train_path or data_dir / "train.csv"
+		validation_path = _validation_path or data_dir / "validation.csv"
+		test_path = _test_path or data_dir / "test.csv"
+
+		train_dataloader = DataLoader(TestGeometricDataset(train_path), shuffle=True, **loader_kwargs)
+		validation_dataloader = DataLoader(TestGeometricDataset(validation_path), shuffle=False, **loader_kwargs)
+		test_dataloader = DataLoader(TestGeometricDataset(test_path), shuffle=False, **loader_kwargs)
+	else:
+		bigru_path = save_path.with_stem(f"{save_path.stem}_{VARIANT}")
+		save_path = save_path.with_stem(f"{save_path.stem}_{VARIANT}")
+
+		train_path = _train_path or data_dir / VARIANT / "train.csv"
+		validation_path = _validation_path or data_dir / VARIANT / "validation.csv"
+		test_path = _test_path or data_dir / VARIANT / "test.csv"
+
+		train_dataloader = DataLoader(TestGeometricDataset(train_path), shuffle=True, **loader_kwargs)
+		validation_dataloader = DataLoader(TestGeometricDataset(validation_path), shuffle=False, **loader_kwargs)
+		test_dataloader = DataLoader(TestGeometricDataset(test_path), shuffle=False, **loader_kwargs)
+
+	model = instantiate_model(save_path, bigru_path=bigru_path, bert_path=bert_path)
+
 	print("data loaded")
 
 	trained_model = train_model(
@@ -267,7 +283,6 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _bigru_path=N
 	save_checkpoint(trained_model, save_path,
 		cleanup_previous=save_path.stem.replace("final_", ""))
 
-	test_dataloader = DataLoader(GeometricDataset(test_path), shuffle=False, **loader_kwargs)
 	test_loss, test_accuracy = test_model(trained_model, test_dataloader)
 	print(f"SANCD Test Loss: {test_loss:.6f}")
 	print(f"SANCD Test Accuracy: {test_accuracy:.4%}")

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import BiGRU
 import SANCD
-from data import GeometricDataset, pad_variable
+from data import TestGeometricDataset, pad_variable
 from torch.utils.data import DataLoader
 
 SEED = 0
@@ -103,7 +103,7 @@ def main():
 			"num_workers": 2,
 			"pin_memory": True }
 
-		test_dataloader = DataLoader(GeometricDataset(test_path), shuffle=False, **loader_kwargs)
+		test_dataloader = DataLoader(TestGeometricDataset(test_path), shuffle=False, **loader_kwargs)
 
 		print("######### Testing BiGRU")
 		bigru_loss, bigru_accuracy = BiGRU.test_model(BiGRU.instantiate_model(bigru_path), test_dataloader)

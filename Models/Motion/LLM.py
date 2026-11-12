@@ -142,11 +142,12 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 			if candidate.is_file() and candidate.suffix == ".pth" and candidate.name.startswith(cleanup_previous.stem):
 				candidate.unlink()
 
-def instantiate_model(model_path):
+def instantiate_model(model_path, **kwargs):
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model_path = Path(model_path)
 	if not model_path.exists():
-		raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
+		print(f"Model checkpoint not found: {model_path}, instantiating new model")
+		return CharacterLanguageModel(**kwargs)
 
 	checkpoint = torch.load(model_path, map_location=device, weights_only=False)
 	config = checkpoint["model_config"]
@@ -159,6 +160,8 @@ def instantiate_model(model_path):
 
 	model.load_state_dict(checkpoint["model_state_dict"], strict=True)
 	model.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+	print("loaded model from saved weights")
 
 	return model
 
@@ -257,12 +260,7 @@ def main(steps=None, *, batch_size=128, compile_model=False):
 	"""Train and evaluate a character LM using Common Crawl News."""
 	save_path = Path(__file__).resolve().parent / "trained" / "final_CharacterLM.pth"
 
-	if save_path.exists():
-		device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-		model = instantiate_model(save_path).to(device)
-		print("loaded saved weights")
-	else:
-		model = CharacterLanguageModel()
+	model = instantiate_model(save_path)
 
 	tokenize = lambda document: model._ids(model.filter_text(document))
 	train_corpus = CCNewsDataset(
