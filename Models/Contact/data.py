@@ -81,8 +81,8 @@ class MaskedDataset(torch.utils.data.Dataset):
 		self.cache_dir = (
 			Path(cache_dir)
 			if cache_dir is not None
-			else Path(__file__).resolve().parent / "_cache"
-		)
+			else Path(__file__).resolve().parent / "_cache")
+
 		name = "train" if train else "test"
 		self.tokens_path = self.cache_dir / f"{name}_tokens.uint8"
 		self.offsets_path = self.cache_dir / f"{name}_offsets.int64.npy"
@@ -164,31 +164,40 @@ finger_idxs = {
 def _first_touching_frames(frames, left_hand, right_hand):
 	""" Identify the first frame of each finger press """
 	# FIXME: I may need debouncing
+	
+	contacting_frames = 0
+	buffered_frames = 0
 
-	contacting = np.asarray([[]] * len(frames), dtype=object)
-	frames = np.asarray(frames).reshape(-1, 54, 3)
+	contacting = [[] for _ in range(len(frames))]
+	frames = np.asarray(frames).reshape(-1, 14, 3)
 	for frame_idx, frame in enumerate(frames):
 		for finger, finger_idx in finger_idxs.items():
 			point = frame[finger_idx]
 
 			hand = left_hand if finger_idx < 8 else right_hand
 			distance_vector = vector_to_surface(point, hand.shape)
-			if np.linalg.norm(distance_vector) <= 1e-6:
+			if np.linalg.norm(distance_vector) <= 0.00005:	# TODO: This is going to be a problem, I don't think the fits are very good
 				contacting[frame_idx].append(finger)
+				contacting_frames += 1
 
-	for i in range(len(frames)-1, 1, -1):
+	for i in range(len(frames)-1, 0, -1):
 		for val in contacting[i].copy():
 			if val in contacting[i-1]:
 				contacting[i].remove(val)
+		contacting[i] = list(set(contacting[i]))	# Not quite sure how this happens
 				
 	# If multiple keys are first pressed on the same frame, displace one
 	# NOTE: It could lead to some typos but I doubt it would be that common
 	for i in range(1, len(frames)-1):
-		if len(contacting[i] > 1):
+		if len(contacting[i]) > 1:
+			buffered_frames += 1
 			if len(contacting[i-1]) == 0 or len(contacting[i+1]) == 0:
 				contacting[i-1].append(contacting[i].pop())
 			else:
 				raise BufferError("Can't displace keypress")
+
+	print(f"contacting frames: {contacting_frames}")
+	print(f"buffered frames: {buffered_frames}")
 
 	return contacting
 
@@ -199,13 +208,17 @@ def _unwrap_adjustment(frame, finger, surface, compressibility, rest_uv):
 	uv = surface_uv(point, surface)
 	# normal, tangent_u, tangent_v, curvature_0, curvature_1
 	res = principal_curvature_frame(point, surface)
-	return np.concatenate((uv, [rest_uv, compressibility], res))
+	return np.concatenate((
+		uv.reshape(-1),
+		rest_uv.reshape(-1),
+		np.atleast_1d(compressibility),
+		*(np.asarray(value).reshape(-1) for value in res)))
 
 def transform(frames, left_hand, right_hand):
 	result = []
 
-	for idx, val in enumerate(_first_touching_frames(frames)):
-		if val == []:
+	for idx, val in enumerate(_first_touching_frames(frames, left_hand, right_hand)[1:]):
+		if len(val) == 0:
 			continue
 		elif len(val) > 1:
 			raise ValueError("Only one contact point per frame")
@@ -225,7 +238,7 @@ def interactive_transform(frame, left_hand, right_hand):
 		point = frame[finger_idx]
 		hand = left_hand if finger_idx < 8 else right_hand
 		distance_vector = vector_to_surface(point, hand.shape)
-		if np.linalg.norm(distance_vector) <= 1e-6:
+		if np.linalg.norm(distance_vector) <= 1e-6:	# FIXME: tune contact threshold
 			contacting.append(finger)
 		elif finger in currently_contacting:
 			currently_contacting.remove(finger)

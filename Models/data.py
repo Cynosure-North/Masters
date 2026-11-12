@@ -1,40 +1,47 @@
 """Parse the raw data from the experiment, apply the relevant processing for each model, and save it to that model's data dir"""
 
+import random
 from pathlib import Path
 import numpy as np
-from fit_shape import calibrate_hand
+from calibration import calibrate_hand
 import Pose.data as pose
 import Contact.data as contact
 import Motion.data as motion
 
+SEED = 0
+rand = random.Random(SEED)
+
 raw_data_folder = Path(r"H:\Research_Data\Morgana North(MHIT)\phase1")
 models_root = Path(__file__).resolve().parent 
 pose_data_dir = models_root / "Pose" / "data" / "training"
-contact_data_dir = models_root / "contact" / "data" / "training"
-contact_data_dir_simple = models_root / "contact" / "data" / "training-simple"
-motion_data_dir = models_root / "Motion" / "data" / "training"
-motion_data_dir_raw = models_root / "Motion" / "data" / "training-raw"
+contact_data_dir = models_root / "contact" / "data" / "3d"
+contact_data_dir_simple = models_root / "contact" / "data" / "3d-simple"
+motion_data_dir = models_root / "Motion" / "data" / "3d"
+motion_data_dir_raw = models_root / "Motion" / "data" / "3d-raw"
+cache_dir = models_root / "_cache"
+cache_dir.mkdir(exist_ok=True)
 
 typo_ratios = {"table": [], "cushion": [], "pipe": [], "legs": []}
 
 def file_generator(data_folder):
-	for participant in data_folder.iterdir():
-		for surface in participant.iterdir():
+	for participant in sorted(data_folder.iterdir()):
+		for surface in sorted(participant.iterdir()):
 
 			if surface.is_file():
 				continue
 
-			# (pose_data_dir / surface.stem).mkdir(parents=True, exist_ok=True)
-			# (contact_data_dir / surface.stem).mkdir(parents=True, exist_ok=True)
-			# (contact_data_dir_simple / surface.stem).mkdir(parents=True, exist_ok=True)
-			# (motion_data_dir / surface.stem).mkdir(parents=True, exist_ok=True)
-			(motion_data_dir_raw / surface.stem).mkdir(parents=True, exist_ok=True)
+			for split in ["train", "validation", "test"]:
+				# (pose_data_dir / surface.stem / split).mkdir(parents=True, exist_ok=True)
+				(contact_data_dir / surface.stem / split).mkdir(parents=True, exist_ok=True)
+				(contact_data_dir_simple / surface.stem / split).mkdir(parents=True, exist_ok=True)
+				(motion_data_dir / surface.stem / split).mkdir(parents=True, exist_ok=True)
+				(motion_data_dir_raw / surface.stem / split).mkdir(parents=True, exist_ok=True)
 
 
 			calibration_files = set(surface.glob("calibration_[0-9]*"))
 			sentence_files = [
-				path for path in surface.iterdir()
-				if path.is_file() and path not in calibration_files ]
+				path for path in sorted(surface.iterdir())
+				if path.is_file() and path not in calibration_files and "_typo" not in path.stem]
 
 
 			typo_ratios[surface.stem].append(
@@ -45,18 +52,18 @@ def file_generator(data_folder):
 				out = []
 				for f in files:
 					record = eval(f.read_text(), {"__builtins__": {}, "array": np.array})
+					# I collected the frame timestamp, but I'm not using it at the moment so only grab the frames
 					frames = np.asarray([frame for _, frame in record])
 					if frames.ndim < 2:
 						# Catches 0-length records
-						print(f"Error on file {f}")
+						# print(f"Zero length record: {f}")
 						continue
 
-					# I collected the frame timestamp, but I'm not using it at the moment so only grab the frames
 					if filename:
-						out.append((f.stem, frames[:, 1]))
+						out.append((f.stem, frames))
 					else:
-						out.append(frames[:, 1])
-				return np.add
+						out.append(frames)
+				return out
 
 			calibrations = parse(calibration_files, filename=False)
 			sentences = parse(sentence_files)
@@ -66,37 +73,58 @@ def file_generator(data_folder):
 			# There were incidents of people accidentally double triggering submit resulting in a <2 frame submission
 			#  and also some situations in which people stopped to ask questions, chat, or take a break
 			calibration_mean = sum([len(calibration) for calibration in calibrations])/len(calibrations)
-			calibrations = [x for x in calibrations if (calibration_mean/5 < x and x < calibration_mean*3)]
+			calibrations = [x for x in calibrations if (calibration_mean/5 < len(x) and len(x) < calibration_mean*3)]
 
 			sentence_mean = sum([len(sentence[1]) for sentence in sentences])/len(sentences)
 			sentences = [x for x in sentences if (sentence_mean/5 < len(x[1]) and len(x[1]) < sentence_mean*3)]
 
-			yield calibrations, sentences, participant, surface
+			yield calibrations, sentences, participant.stem, surface.stem
 
 def preprocess():
 
 	for calibrations, sentences, participant, surface in file_generator(raw_data_folder):
 
-		calibrations = np.asarray(calibrations)
-
-		# Each hand is calibrated based on the fingertip positions
-		try:
-			left_hand, right_hand = calibrate_hand(calibrations[:, :7]), calibrate_hand(calibrations[:, 7:])
-		except:
-			print(f"Error calibrating {participant}/{surface}")
-			raise
+		calibration_cache_path = cache_dir / f"{participant}_{surface}.npy"
+		if calibration_cache_path.exists():
+			left_hand, right_hand = np.load(calibration_cache_path, allow_pickle=True)
+			print(f"loaded saved_calibration {calibration_cache_path}")
+		else:
+			# Each hand is calibrated based on the fingertip positions
+			try:
+				left_hand_calibration, right_hand_calibration = \
+					[x[:, :7] for x in calibrations], [x[:, 7:] for x in calibrations]
+				left_hand, right_hand = \
+					calibrate_hand(left_hand_calibration, surface), calibrate_hand(right_hand_calibration, surface)
+				print(
+					f"{participant}\t{surface} left_hand.shape: {type(left_hand.shape).__name__}"
+					f"\t right_hand.shape: {type(right_hand.shape).__name__}")
+				np.save(calibration_cache_path, [left_hand, right_hand])
+			except:
+				print(f"Error calibrating {participant}/{surface}")
+				raise
 
 		for sentence, frames in sentences:
-			filename = f"{participant.stem.split('_')[1]}_{sentence}"
+			filename = f"{participant.split('_')[1]}_{sentence}"
 			# pose.fit_scaler(frames)
+			
+			split = ["validation", "test", "validation", "test", "validation", "test",
+			 "train", "train", "train", "train", "train"][rand.randint(0,9)]
+
+			if (contact_data_dir / surface / split / filename).exists():
+				print(f"Skipping existing file: {filename}")
+				continue
+				# It's fairly unlikely the code will get interrupted in between save statements
+				# and if it does and one or two files aren't saved as training data it's not a huge
+				# deal, so only checking one file is fine
+			print(f"Processing {filename}")
 
 			contact_frames = contact.transform(frames, left_hand, right_hand)
-			np.save(contact_data_dir / surface.stem / filename, contact_frames)
+			np.save(contact_data_dir / surface / split / filename, contact_frames)
 			# Simplified version only has UV coordinates of contact points and hand rest position
-			np.save(contact_data_dir_simple / surface.stem / filename, contact_frames[:, :3])
+			np.save(contact_data_dir_simple / surface / split / filename, contact_frames[:, :3])
 
-			np.save(motion_data_dir / surface.stem / filename, motion.transform(frames, left_hand, right_hand))
-			np.save(motion_data_dir_raw / surface.stem / filename, np.diff(frames))
+			np.save(motion_data_dir / surface / split / filename, motion.transform(frames, left_hand, right_hand))
+			np.save(motion_data_dir_raw / surface / split / filename, np.diff(frames))
 
 	# for _, sentences, _, _ in file_generator(raw_data_folder):
 	# 	for _, frames in sentences:
@@ -104,8 +132,12 @@ def preprocess():
 
 	# for _, sentences, participant, surface in file_generator(raw_data_folder):
 	# 	for sentence, frames in sentences:
-	# 		filename = f"{participant.stem.split('_')[1]}_{sentence}"
-	# 		np.save(pose.transform(frames), pose_data_dir / surface / filename)
+	#
+	# 		filename = f"{participant.split('_')[1]}_{sentence}"
+	#		split = ["validation", "test", "validation", "test", "validation", "test",
+	#		 "train", "train", "train", "train", "train"][rand.randint(0,9)]
+	#
+	# 		np.save(pose.transform(frames), pose_data_dir / surface / split / filename)
 	# 		# Scaler and PCA need to be fit on the full training set before transforming the data
 
 	# Save scaler and PCA values with the data
@@ -121,3 +153,7 @@ def preprocess():
 
 if __name__ == "__main__":
 	preprocess()
+
+
+
+# TODO: New Dataloaders (and loading them in main functions)

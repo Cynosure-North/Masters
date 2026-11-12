@@ -1,23 +1,18 @@
 """Character-level language model compatible with BeamSearcher."""
 
 import math
-import hashlib
-import threading
-import queue
 from collections import OrderedDict
 from pathlib import Path
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
-from data import CommonCrawlNewsStream, chars
+from data import CCNewsDataset, chars
 
 SEED = 0
 torch.manual_seed(SEED)
-TOKEN_BYTES = torch.tensor([], dtype=torch.long).element_size()
-
-
 class CharacterLanguageModel(nn.Module):
 	"""Small recurrent character LM with length-normalized log scoring."""
 
@@ -55,7 +50,7 @@ class CharacterLanguageModel(nn.Module):
 	@staticmethod
 	def filter_text(text):
 		return " ".join(
-			"".join(character if character in chars else " " for character in str(text).lower()).split()
+			"".join(character if character in chars else "" for character in str(text).lower()).split()
 		)
 
 	def to(self, *args, **kwargs):
@@ -167,155 +162,6 @@ def instantiate_model(model_path):
 
 	return model
 
-class CharacterTextCorpus:
-	"""Encoded text documents used for finite evaluation."""
-
-	def __init__(self, documents):
-		self.documents = [str(document) for document in documents]
-		if not self.documents:
-			raise ValueError("CharacterTextCorpus cannot be empty")
-		self.tokens = None
-
-	def encode(self, model):
-		tokens = [model.bos_id]
-		for document in self.documents:
-			text = model.filter_text(document)
-			if text:
-				tokens.extend(model._ids(text))
-				tokens.append(model.bos_id)
-		if len(tokens) < 2:
-			raise ValueError("Character corpus has no supported characters")
-		self.tokens = torch.tensor(tokens, dtype=torch.long)
-		return self.tokens
-
-	def sample_batch(self, batch_size, block_size, device):
-		if self.tokens is None:
-			raise RuntimeError("Call encode(model) before requesting token batches")
-		if self.tokens.numel() <= block_size:
-			raise ValueError("Corpus is too short for the configured context window")
-		starts = torch.randint(self.tokens.numel() - block_size, (batch_size,))
-		inputs = torch.stack([self.tokens[start:start + block_size] for start in starts])
-		targets = torch.stack([
-			self.tokens[start + 1:start + block_size + 1] for start in starts
-		])
-		return inputs.to(device), targets.to(device)
-
-	def batches(self, block_size, device):
-		if self.tokens is None:
-			raise RuntimeError("Call encode(model) before requesting token batches")
-		for start in range(0, self.tokens.numel() - 1, block_size):
-			end = min(start + block_size + 1, self.tokens.numel())
-			inputs = self.tokens[start:end - 1].unsqueeze(0).to(device)
-			targets = self.tokens[start + 1:end].to(device)
-			if targets.numel():
-				yield inputs, targets
-
-
-class StreamingCharacterCorpus:
-	"""Prefetch character batches from a Common Crawl document stream."""
-
-	def __init__(
-		self,
-		document_stream,
-		model,
-		*,
-		max_documents=None,
-		prefetch_batches=16,
-		max_token_cache_bytes=64 * 1024 * 1024,
-	):
-		if prefetch_batches < 1:
-			raise ValueError("prefetch_batches must be at least 1")
-		if max_token_cache_bytes < 1:
-			raise ValueError("max_token_cache_bytes must be at least 1")
-		self.document_stream = document_stream
-		self.model = model
-		self.max_documents = max_documents
-		self._iterator = None
-		self._buffer = []
-		self._queue = queue.Queue(maxsize=prefetch_batches)
-		self._stop = threading.Event()
-		self._thread = None
-		self._config = None
-		self._token_cache = OrderedDict()
-		self._token_cache_bytes = 0
-		self._max_token_cache_bytes = max_token_cache_bytes
-
-	def _tokens(self):
-		yield self.model.bos_id
-		for document in self.document_stream.iter_documents(max_documents=self.max_documents):
-			document_key = hashlib.sha256(document.encode("utf-8")).digest()
-			token_ids = self._token_cache.pop(document_key, None)
-			if token_ids is None:
-				text = self.model.filter_text(document)
-				token_ids = tuple(self.model._ids(text)) if text else ()
-				token_bytes = len(token_ids) * TOKEN_BYTES
-				if token_ids and token_bytes <= self._max_token_cache_bytes:
-					self._token_cache[document_key] = token_ids
-					self._token_cache_bytes += token_bytes
-					while self._token_cache_bytes > self._max_token_cache_bytes:
-						_, evicted = self._token_cache.popitem(last=False)
-						self._token_cache_bytes -= len(evicted) * TOKEN_BYTES
-			else:
-				self._token_cache[document_key] = token_ids
-			if token_ids:
-				yield from token_ids
-				yield self.model.bos_id
-
-	def _sample_cpu_batch(self, batch_size, block_size):
-		if self._iterator is None:
-			self._iterator = iter(self._tokens())
-		needed = batch_size * (block_size + 1)
-		while len(self._buffer) < needed:
-			try:
-				self._buffer.append(next(self._iterator))
-			except StopIteration as exc:
-				raise ValueError(
-					"Common Crawl stream ended before a training batch could be formed"
-				) from exc
-		sequences = torch.tensor(self._buffer[:needed], dtype=torch.long)
-		self._buffer = self._buffer[needed:]
-		sequences = sequences.reshape(batch_size, block_size + 1)
-		return sequences[:, :-1], sequences[:, 1:]
-
-	def _worker(self, batch_size, block_size):
-		try:
-			while not self._stop.is_set():
-				if not self._put(("batch", self._sample_cpu_batch(batch_size, block_size))):
-					return
-		except Exception as exc:
-			self._put(("error", exc))
-
-	def _put(self, item):
-		while not self._stop.is_set():
-			try:
-				self._queue.put(item, timeout=0.1)
-				return True
-			except queue.Full:
-				continue
-		return False
-
-	def sample_batch(self, batch_size, block_size, device):
-		config = (batch_size, block_size)
-		if self._thread is None:
-			self._config = config
-			self._thread = threading.Thread(
-				target=self._worker, args=config, name="character-lm-prefetch", daemon=True
-			)
-			self._thread.start()
-		elif config != self._config:
-			raise ValueError("batch_size and block_size cannot change after prefetching starts")
-		kind, result = self._queue.get()
-		if kind == "error":
-			raise result
-		inputs, targets = result
-		if device.type == "cuda":
-			inputs = inputs.pin_memory()
-			targets = targets.pin_memory()
-		return inputs.to(device, non_blocking=True), targets.to(device, non_blocking=True)
-
-	def close(self):
-		self._stop.set()
-
 
 def test_model(model, corpus, *, block_size=256):
 	"""Return average next-character loss and perplexity for an encoded corpus."""
@@ -410,9 +256,6 @@ def train_model(
 def main(steps=None, *, batch_size=128, compile_model=False):
 	"""Train and evaluate a character LM using Common Crawl News."""
 	save_path = Path(__file__).resolve().parent / "trained" / "final_CharacterLM.pth"
-	train_source = CommonCrawlNewsStream("train", seed=SEED, max_warcs=16)
-	validation_source = CommonCrawlNewsStream("validation", seed=SEED + 1, max_warcs=8)
-	test_source = CommonCrawlNewsStream("test", seed=SEED + 2, max_warcs=8)
 
 	if save_path.exists():
 		device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -421,15 +264,25 @@ def main(steps=None, *, batch_size=128, compile_model=False):
 	else:
 		model = CharacterLanguageModel()
 
-	validation_corpus = CharacterTextCorpus(
-		list(validation_source.iter_documents(max_documents=250))
-	)
-	test_corpus = CharacterTextCorpus(list(test_source.iter_documents(max_documents=250)))
-	validation_corpus.encode(model)
-	test_corpus.encode(model)
-	train_corpus = StreamingCharacterCorpus(train_source, model)
+	tokenize = lambda document: model._ids(model.filter_text(document))
+	train_corpus = CCNewsDataset(
+		"train",
+		tokenize,
+		bos_id=model.bos_id,
+		min_document_count=10_000,
+		vocab_size=model.vocab_size)
+	validation_corpus = CCNewsDataset(
+		"validation",
+		tokenize,
+		bos_id=model.bos_id,
+		vocab_size=model.vocab_size)
+	test_corpus = CCNewsDataset(
+		"test",
+		tokenize,
+		bos_id=model.bos_id,
+		vocab_size=model.vocab_size)
+	print("data loaded")
 
-	print("######### Training Character LM")
 	trained_model = train_model(
 		model,
 		train_corpus,
@@ -440,7 +293,7 @@ def main(steps=None, *, batch_size=128, compile_model=False):
 		compile_model=compile_model)
 	save_checkpoint(model, save_path)
 
-	print("######### Testing Character LM")
+	print("training complete")
 	loss, perplexity = test_model(trained_model, test_corpus)
 	print(f"Test Loss: {loss:.4f}")
 	print(f"Test Perplexity: {perplexity:.4f}")
@@ -449,6 +302,3 @@ def main(steps=None, *, batch_size=128, compile_model=False):
 
 if __name__ == "__main__":
 	main()
-
-
-# TODO: Training is so slow. Also there's probably no need to continuously stream data. A bank should be fine (maybe expand in background)

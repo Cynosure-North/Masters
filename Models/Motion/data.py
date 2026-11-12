@@ -1,12 +1,18 @@
 import gzip
 import hashlib
-import queue
+import io
+import json
 import random
 import re
-import threading
 import zlib
+from concurrent.futures import (
+	ThreadPoolExecutor,
+	ProcessPoolExecutor,
+	FIRST_COMPLETED,
+	as_completed,
+	wait,
+)
 from datetime import date
-from html.parser import HTMLParser
 from pathlib import Path
 import numpy as np
 from numpy.random import f
@@ -97,517 +103,355 @@ class TestMotionDataset(torch.utils.data.Dataset):
 
 ####################################
 
-class _ArticleTextParser(HTMLParser):
-	"""Extract visible text from an article's HTML payload."""
+def _cc_news_months():
+	today = date.today()
+	end = today.year * 12 + today.month - 1
+	for month_index in range(end - 11, end + 1):
+		year, month = divmod(month_index, 12)
+		yield year, month + 1
 
-	_IGNORED_TAGS = {"script", "style", "noscript", "svg"}
+def _process_cc_news_warc(path, warc_cache_path):
+	"""Load, cache, and extract usable article text from one WARC file."""
+	import requests
+	from trafilatura import extract
+	from warcio.archiveiterator import ArchiveIterator
 
-	def __init__(self):
-		super().__init__(convert_charrefs=True)
-		self.parts = []
-		self._ignored_depth = 0
-		self._ignored_tags = []
+	try:
+		if warc_cache_path.exists():
+			warc_bytes = warc_cache_path.read_bytes()
+		else:
+			response = requests.get(
+				f"https://data.commoncrawl.org/{path.lstrip('/')}",
+				headers={"User-Agent": "ThesisLanguageModel/1.0"},
+				timeout=(15, 120),
+			)
+			response.raise_for_status()
+			warc_bytes = response.content
+			temporary_path = warc_cache_path.with_suffix(".tmp")
+			temporary_path.write_bytes(warc_bytes)
+			temporary_path.replace(warc_cache_path)
+		documents = []
+		with gzip.GzipFile(fileobj=io.BytesIO(warc_bytes)) as archive:
+			for record in ArchiveIterator(archive):
+				if record.rec_type != "response":
+					continue
+				content_type = record.http_headers.get_header("Content-Type", "")
+				if content_type and "html" not in content_type.lower():
+					continue
+				body = record.content_stream().read()
+				if len(body) < 1_000:
+					continue
+				body_content = body.decode("utf-8", errors="ignore")
+				if not _is_english(body_content):
+					continue
+				text = extract(
+					body_content,
+					include_comments=False,
+					include_tables=False,
+					deduplicate=True,
+					output_format="txt",
+					target_language="en",
+				)
+				if text and len(text) >= 300 and _is_english(text):
+					documents.append(text)
+		return documents
+	except (requests.RequestException, OSError, EOFError, zlib.error) as exc:
+		if warc_cache_path.exists():
+			warc_cache_path.unlink(missing_ok=True)
+		print(f"Skipping CC-News WARC {path}: {exc}")
+		return []
 
-	def handle_starttag(self, tag, attrs):
-		if tag in self._IGNORED_TAGS:
-			self._ignored_depth += 1
-			self._ignored_tags.append(tag)
+def _is_english(text):
+	"""Reject non-English text without adding a language-detection dependency."""
+	# It is extremely unlikely that proper english prose would not use at least a few of these words
+	# this list is AI generated, so I'm not sure if it's the best list but it will do
+	common_english_words = {
+		"about", "after", "also", "and", "are", "because", "been", "before",
+		"being", "but", "could", "from", "have", "into", "more", "most",
+		"not", "only", "other", "said", "some", "than", "that", "their",
+		"there", "these", "they", "this", "was", "were", "what", "when",
+		"where", "which", "who", "with", "would", "year", "you" }
 
-	def handle_endtag(self, tag):
-		if self._ignored_tags and tag == self._ignored_tags[-1]:
-			self._ignored_tags.pop()
-			self._ignored_depth -= 1
-
-	def handle_data(self, data):
-		if not self._ignored_depth:
-			text = " ".join(data.split())
-			if text:
-				self.parts.append(text)
+	words = re.findall(r"[a-z]+", text.lower())
+	if len(words) < 5:
+		return False
+	ascii_letters = sum(character.isascii() and character.isalpha() for character in text)
+	letters = sum(character.isalpha() for character in text)
+	if not letters or ascii_letters / letters < 0.9:
+		return False
+	return len(set(words) & common_english_words) >= 2
 
 
-class CommonCrawlNewsStream:
-	"""Stream cached and newly downloaded documents from Common Crawl News."""
+def _fetch_cc_news_listing(year, month, cache_path):
+	import requests
 
-	BASE_URL = "https://data.commoncrawl.org/crawl-data/CC-NEWS"
-	CACHE_DIR = Path(__file__).resolve().parent / "_cache" / "cc-news"
-	DOCUMENT_CACHE_DIR = CACHE_DIR / "documents"
-	SPLIT_MODULUS = 20
-	SPLIT_BUCKETS = {"validation": set(range(3)), "test": set(range(3, 6))}
+	if cache_path.exists():
+		try:
+			return json.loads(cache_path.read_text(encoding="utf-8"))
+		except (OSError, UnicodeError, json.JSONDecodeError):
+			cache_path.unlink(missing_ok=True)
+
+	url = f"https://data.commoncrawl.org/crawl-data/CC-NEWS/{year}/{month:02d}/warc.paths.gz"
+	try:
+		response = requests.get(
+			url,
+			headers={"User-Agent": "ThesisLanguageModel/1.0"},
+			timeout=(15, 60),
+		)
+		if response.status_code == 404:
+			return []
+		response.raise_for_status()
+		paths = [
+			line.strip()
+			for line in gzip.decompress(response.content).decode("utf-8").splitlines()
+			if line.strip()
+		]
+		temporary_path = cache_path.with_suffix(".tmp")
+		temporary_path.write_text(json.dumps(paths), encoding="utf-8")
+		temporary_path.replace(cache_path)
+		return paths
+	except (requests.RequestException, OSError, UnicodeDecodeError) as exc:
+		print(f"Skipping CC-News listing {url}: {exc}")
+		return []
+
+
+def _download_cc_news_documents(split, document_count, cache_dir, max_workers=8):
+	"""Download and parse a bounded CC-News sample with extracted-text caching """
+
+	if split not in {"train", "validation", "test"}:
+		raise ValueError("split must be 'train', 'validation', or 'test'")
+	if document_count < 1:
+		raise ValueError("document_count must be at least 1")
+	if max_workers < 1:
+		raise ValueError("max_workers must be at least 1")
+
+	split_buckets = {
+		"validation": {0, 1, 2},
+		"test": {3, 4, 5},
+	}
+	document_cache = Path(cache_dir) / "documents" / split
+	warc_cache = Path(cache_dir) / "warcs"
+	listing_cache = Path(cache_dir) / "listings"
+	document_cache.mkdir(parents=True, exist_ok=True)
+	warc_cache.mkdir(parents=True, exist_ok=True)
+	listing_cache.mkdir(parents=True, exist_ok=True)
+	paths = []
+	with ThreadPoolExecutor(max_workers=min(max_workers, 12)) as executor:
+		listing_futures = [
+			executor.submit(
+				_fetch_cc_news_listing,
+				year,
+				month,
+				listing_cache / f"{year:04d}-{month:02d}.json",
+			)
+			for year, month in _cc_news_months()
+		]
+		for future in as_completed(listing_futures):
+			paths.extend(future.result())
+
+	random.Random(SEED).shuffle(paths)
+	selected = [
+		path for path in paths
+		if (
+			(zlib.crc32(path.encode("utf-8")) % 20 in split_buckets[split])
+			if split != "train"
+			else zlib.crc32(path.encode("utf-8")) % 20 not in {0, 1, 2, 3, 4, 5}
+		)
+	]
+	print(f"Found {len(selected)} CC-News WARC paths for {split}")
+
+	documents = []
+	uncached = []
+	for path in selected:
+		cache_path = document_cache / f"{hashlib.sha256(path.encode()).hexdigest()}.json"
+		if cache_path.exists():
+			try:
+				documents.extend(json.loads(cache_path.read_text(encoding="utf-8")))
+				if len(documents) >= document_count:
+					return documents
+				continue
+			except (OSError, UnicodeError, json.JSONDecodeError):
+				cache_path.unlink(missing_ok=True)
+		uncached.append((path, cache_path))
+
+	uncached_iterator = iter(uncached)
+	with ProcessPoolExecutor(max_workers=max_workers) as executor:
+		futures = {}
+		for _ in range(max_workers):
+			try:
+				path, cache_path = next(uncached_iterator)
+			except StopIteration:
+				break
+			future = executor.submit(
+				_process_cc_news_warc,
+				path,
+				warc_cache / f"{hashlib.sha256(path.encode()).hexdigest()}.warc.gz",
+			)
+			futures[future] = (path, cache_path)
+
+		while futures and len(documents) < document_count:
+			done, _ = wait(futures, return_when=FIRST_COMPLETED)
+			for future in done:
+				path, cache_path = futures.pop(future)
+				warc_documents = future.result()
+				cache_path.write_text(
+					json.dumps(warc_documents, ensure_ascii=False),
+					encoding="utf-8",
+				)
+				documents.extend(warc_documents)
+				print(f"Processed {path}")
+				if len(documents) >= document_count:
+					break
+				try:
+					next_path, next_cache_path = next(uncached_iterator)
+				except StopIteration:
+					continue
+				next_future = executor.submit(
+					_process_cc_news_warc,
+					next_path,
+					warc_cache / f"{hashlib.sha256(next_path.encode()).hexdigest()}.warc.gz",
+				)
+				futures[next_future] = (next_path, next_cache_path)
+
+			if len(documents) >= document_count:
+				for future in futures:
+					future.cancel()
+	if len(documents) < document_count:
+		raise ValueError(f"Expected {document_count} documents, but found {len(documents)}")
+	return documents
+
+
+class CCNewsDataset:
+	"""Memory-mapped, pre-tokenized CC-News corpus."""
 
 	def __init__(
 		self,
-		split,
+		name,
+		tokenizer,
 		*,
-		seed=SEED,
-		max_warcs=16,
-		lookback_months=12,
-		documents_per_warc=100,
-		min_chars=300,
-		max_cache_documents=10_000,
-		max_cache_bytes=256 * 1024 * 1024,
-	):
-		if split not in {"train", "validation", "test"}:
-			raise ValueError("split must be 'train', 'validation', or 'test'")
-		if max_warcs < 1:
-			raise ValueError("max_warcs must be at least 1")
-		if lookback_months < 1 or documents_per_warc < 1:
-			raise ValueError("lookback_months and documents_per_warc must be at least 1")
-		if max_cache_documents < 1 or max_cache_bytes < 1:
-			raise ValueError("cache limits must be at least 1")
-		self.split = split
-		self.seed = seed
-		self.max_warcs = max_warcs
-		self.lookback_months = lookback_months
-		self.documents_per_warc = documents_per_warc
-		self.min_chars = min_chars
-		self.max_cache_documents = max_cache_documents
-		self.max_cache_bytes = max_cache_bytes
-		self._warc_paths = None
-		self._iteration = 0
-		self._cache_lock = threading.RLock()
+		bos_id,
+		vocab_size,
+		cache_dir=None,
+		min_document_count=1000,
+		block_size=256):
+		if name not in {"train", "validation", "test"}:
+			raise ValueError("name must be 'train', 'validation', or 'test'")
+		if block_size < 1 or min_document_count < 1:
+			raise ValueError("block_size and document_count must be at least 1")
 
-	def _months(self):
-		today = date.today()
-		end_month = today.year * 12 + today.month - 1
-		start_month = end_month - self.lookback_months + 1
-		for month_index in range(start_month, end_month + 1):
-			year, month = divmod(month_index, 12)
-			yield year, month + 1
+		self.name = name
+		self.tokenizer = tokenizer
+		self.vocab_size = vocab_size
+		self.bos_id = bos_id
 
-	@staticmethod
-	def _configure_http_session(session):
-		from requests.adapters import HTTPAdapter
-		from urllib3.util.retry import Retry
+		self.cache_dir = (
+			Path(cache_dir)
+			if cache_dir is not None
+			else Path(__file__).resolve().parent / "_cache" )
 
-		retry = Retry(
-			total=8,
-			connect=8,
-			read=8,
-			status=8,
-			backoff_factor=3,
-			backoff_jitter=1,
-			status_forcelist=(429, 500, 502, 503, 504),
-			allowed_methods=frozenset({"GET"}),
-			respect_retry_after_header=True,
-		)
-		adapter = HTTPAdapter(max_retries=retry)
-		session.mount("https://", adapter)
-		session.mount("http://", adapter)
-		session.headers.update({
-			"User-Agent": "Mozilla/5.0 (compatible; ThesisLanguageModel/1.0; research use)",
-			"Accept": "application/gzip, */*",
-		})
+		self.tokens_path = self.cache_dir / f"{name}_tokens.uint8"
+		self.offsets_path = self.cache_dir / f"{name}_offsets.int64.npy"
+		self.signature_path = self.cache_dir / f"{name}_vocab_signature.int64.npy"
 
-	@classmethod
-	def _listing_cache_path(cls, year, month):
-		return cls.CACHE_DIR / f"{year:04d}-{month:02d}.paths"
+		if not self._cache_is_valid():
+			self._build_cache(min_document_count)
 
-	def _get_warc_paths(self, *, refresh=False):
-		if self._warc_paths is not None and not refresh:
-			return self._warc_paths
+		self.block_size = block_size
+		self._tokens = np.memmap(self.tokens_path, mode="r", dtype=np.uint8)
+		self._offsets = np.load(self.offsets_path, mmap_mode="r")
+		self._size = int(self._offsets[-1])
+		if self._size <= block_size:
+			raise ValueError("Token cache is too short for the configured context window")
 
-		import requests
-
-		paths = []
-		with requests.Session() as session:
-			self._configure_http_session(session)
-			for year, month in self._months():
-				cache_path = self._listing_cache_path(year, month)
-				if not refresh and cache_path.exists():
-					try:
-						listing = cache_path.read_text(encoding="utf-8")
-						paths.extend(line.strip() for line in listing.splitlines() if line.strip())
-						continue
-					except (OSError, UnicodeError) as exc:
-						print(f"Ignoring invalid CC-NEWS cache {cache_path}: {exc}")
-
-				url = f"{self.BASE_URL}/{year}/{month:02d}/warc.paths.gz"
-				try:
-					response = session.get(url, timeout=(15, 60))
-					if response.status_code == 404:
-						continue
-					response.raise_for_status()
-					listing = gzip.decompress(response.content).decode("utf-8")
-				except requests.RequestException as exc:
-					print(f"Skipping unavailable CC-NEWS listing {url}: {exc}")
-					continue
-				except (OSError, UnicodeDecodeError) as exc:
-					print(f"Skipping invalid CC-NEWS listing {url}: {exc}")
-					continue
-				try:
-					cache_path.parent.mkdir(parents=True, exist_ok=True)
-					temporary_path = cache_path.with_suffix(".tmp")
-					temporary_path.write_text(listing, encoding="utf-8")
-					temporary_path.replace(cache_path)
-				except OSError as exc:
-					print(f"Could not cache CC-NEWS listing {cache_path}: {exc}")
-				paths.extend(line.strip() for line in listing.splitlines() if line.strip())
-
-		self._warc_paths = paths
-		return paths
-
-	def _selected_warc_paths(self, *, refresh=False):
-		paths = []
-		validation_buckets = self.SPLIT_BUCKETS["validation"]
-		test_buckets = self.SPLIT_BUCKETS["test"]
-		for path in self._get_warc_paths(refresh=refresh):
-			bucket = zlib.crc32(path.encode("utf-8")) % self.SPLIT_MODULUS
-			if (self.split == "validation" and bucket in validation_buckets) or (self.split == "test" and bucket in test_buckets) or (self.split == "train" and bucket not in validation_buckets | test_buckets):
-				paths.append(path)
-		if not paths:
-			raise FileNotFoundError(f"No Common Crawl News WARCs available for split {self.split!r}")
-
-		cycle_seed = self.seed + self._iteration
-		self._iteration += 1
-		random.Random(cycle_seed).shuffle(paths)
-		return paths[:self.max_warcs]
-
-	@staticmethod
-	def _extract_text(payload):
-		parser = _ArticleTextParser()
-		parser.feed(payload.decode("utf-8", errors="replace"))
-		parser.close()
-		return " ".join(parser.parts)
-
-	@property
-	def _document_cache_path(self):
-		cache_path = self.DOCUMENT_CACHE_DIR / self.split
-		cache_path.mkdir(parents=True, exist_ok=True)
-		return cache_path
-
-	def _cached_document_paths(self):
-		with self._cache_lock:
-			return sorted(self._document_cache_path.glob("*.txt"))
-
-	def _cache_document(self, text):
-		"""Persist a document when it fits without evicting existing documents."""
-		document_path = self._document_cache_path / (
-			f"{hashlib.sha256(text.encode('utf-8')).hexdigest()}.txt"
-		)
-		with self._cache_lock:
-			paths = self._cached_document_paths()
-			if document_path.exists():
-				return True
-			total_bytes = sum(path.stat().st_size for path in paths)
-			document_bytes = len(text.encode("utf-8"))
-			if (
-				len(paths) >= self.max_cache_documents
-				or total_bytes + document_bytes > self.max_cache_bytes
-			):
-				return False
-			temporary_path = document_path.with_suffix(".tmp")
-			try:
-				temporary_path.write_text(text, encoding="utf-8")
-				temporary_path.replace(document_path)
-			except OSError as exc:
-				print(f"Could not cache Common Crawl document {document_path}: {exc}")
-				return False
-			return True
-
-	def _cache_has_capacity(self):
-		with self._cache_lock:
-			paths = self._cached_document_paths()
-			return (
-				len(paths) < self.max_cache_documents
-				and sum(path.stat().st_size for path in paths) < self.max_cache_bytes
-			)
-
-	def _iter_remote_documents(self):
-		import requests
-
-		with requests.Session() as session:
-			self._configure_http_session(session)
-			while True:
-				if not self._cache_has_capacity():
-					return
-				paths = self._selected_warc_paths(refresh=False)
-				per_warc_limit = self.documents_per_warc
-
-				for path in paths:
-					if not self._cache_has_capacity():
-						return
-					url = f"https://data.commoncrawl.org/{path.lstrip('/')}"
-					try:
-						with session.get(url, stream=True, timeout=(15, 120)) as response:
-							response.raise_for_status()
-							with gzip.GzipFile(fileobj=response.raw, mode="rb") as archive:
-								records_yielded = 0
-								for warc_headers, payload in self._iter_warc_records(archive):
-									if warc_headers.get("warc-type", "").lower() != "response":
-										continue
-									http_headers, body = self._parse_http_payload(payload)
-									content_type = http_headers.get("content-type", "").lower()
-									if content_type and "html" not in content_type:
-										continue
-									text = self._extract_text(body)
-									if len(text) < self.min_chars:
-										continue
-									if not self._cache_has_capacity():
-										return
-									yield text
-									records_yielded += 1
-									if records_yielded >= per_warc_limit:
-										break
-					except (requests.RequestException, OSError, EOFError, zlib.error) as exc:
-						print(f"Skipping CC-NEWS WARC after retries failed: {path} ({exc})")
-
-	def iter_documents(self, *, max_documents=None):
-		"""Yield cached documents, downloading and caching more in the background."""
-		if max_documents is not None and max_documents < 1:
-			return
-
-		cached_paths = self._cached_document_paths()
-		needs_producer = max_documents is None or len(cached_paths) < max_documents
-		pending = queue.Queue(maxsize=32)
-		stop = threading.Event()
-		producer = None
-
-		def load_documents():
-			try:
-				for text in self._iter_remote_documents():
-					if stop.is_set():
-						return
-					if not self._cache_has_capacity() or not self._cache_document(text):
-						return
-					while not stop.is_set():
-						try:
-							pending.put(text, timeout=0.1)
-							break
-						except queue.Full:
-							continue
-			except Exception as exc:
-				pending.put(exc)
-
-		if needs_producer:
-			producer = threading.Thread(
-				target=load_documents,
-				name=f"commoncrawl-{self.split}-cache",
-				daemon=True,
-			)
-			producer.start()
-
-		yielded = 0
-		seen = set()
+	def _cache_is_valid(self):
+		if not (
+			self.tokens_path.exists()
+			and self.offsets_path.exists()
+			and self.signature_path.exists()
+		):
+			return False
 		try:
-			while max_documents is None or yielded < max_documents:
-				paths = self._cached_document_paths()
-				if paths:
-					for path in paths:
-						if max_documents is not None and yielded >= max_documents:
-							return
-						if path.stem in seen:
-							continue
-						try:
-							with self._cache_lock:
-								text = path.read_text(encoding="utf-8")
-						except (OSError, UnicodeError) as exc:
-							print(f"Skipping invalid Common Crawl cache file {path}: {exc}")
-							continue
-						yield text
-						yielded += 1
-						seen.add(path.stem)
+			signature = np.load(self.signature_path, allow_pickle=False)
+			offsets = np.load(self.offsets_path, mmap_mode="r")
+			return (
+				signature.size == 1
+				and int(signature[0]) == self.vocab_size
+				and offsets.ndim == 1
+				and len(offsets) > 1
+				and int(offsets[-1]) == self.tokens_path.stat().st_size
+			)
+		except (OSError, ValueError):
+			return False
 
-				try:
-					result = pending.get(timeout=0.2)
-				except queue.Empty:
-					seen.clear()
-					continue
-				if isinstance(result, Exception):
-					raise result
-				document_id = hashlib.sha256(result.encode("utf-8")).hexdigest()
-				if document_id in seen:
-					continue
-				yield result
-				yielded += 1
-				seen.add(document_id)
-		finally:
-			stop.set()
-			if producer is not None:
-				producer.join(timeout=1)
+	def _build_cache(self, document_count):
+		# This function is slower than I would expect, but it should only need to run once
 
-	@staticmethod
-	def _iter_warc_records(stream):
-		"""Read WARC records incrementally from a concatenated-gzip archive."""
-		while True:
-			line = stream.readline()
-			while line and not line.startswith(b"WARC/"):
-				line = stream.readline()
-			if not line:
-				return
+		self.cache_dir.mkdir(parents=True, exist_ok=True)
+		for path in (self.tokens_path, self.offsets_path, self.signature_path):
+			path.unlink(missing_ok=True)
 
-			headers = {}
-			while True:
-				line = stream.readline()
-				if not line or line in (b"\r\n", b"\n"):
-					break
-				name, separator, value = line.partition(b":")
-				if separator:
-					headers[name.decode("ascii", errors="ignore").lower()] = (
-						value.decode("utf-8", errors="replace").strip()
-					)
+		offsets = [0]
+		documents = 0
+		with self.tokens_path.open("wb") as target:
+			for document in _download_cc_news_documents( self.name, document_count, self.cache_dir):
+				tokens = [self.bos_id, *self.tokenizer(document), self.bos_id]
+				if any(token < 0 or token >= self.vocab_size for token in tokens):
+					raise ValueError("Tokenizer returned an invalid token ID")
+				target.write(bytes(tokens))
+				offsets.append(offsets[-1] + len(tokens))
+				documents += 1
+		if documents < document_count:
+			raise ValueError(f"Expected {document_count} documents, but cached {documents}")
+		np.save(self.offsets_path, np.asarray(offsets, dtype=np.int64))
+		np.save(self.signature_path, np.asarray([self.vocab_size], dtype=np.int64))
 
-			try:
-				content_length = int(headers["content-length"])
-			except (KeyError, ValueError):
-				return
-			payload = stream.read(content_length)
-			if len(payload) != content_length:
-				return
-			yield headers, payload
+	def __len__(self):
+		return len(self._offsets) - 1
 
-	@staticmethod
-	def _parse_http_payload(payload):
-		separator = b"\r\n\r\n"
-		if separator not in payload:
-			separator = b"\n\n"
-			line_ending = b"\n"
-		else:
-			line_ending = b"\r\n"
-		header_block, _, body = payload.partition(separator)
-		http_headers = {}
-		for line in header_block.split(line_ending)[1:]:
-			name, separator, value = line.partition(b":")
-			if separator:
-				http_headers[name.decode("ascii", errors="ignore").lower()] = (
-					value.decode("utf-8", errors="replace").strip()
-				)
-		if http_headers.get("content-encoding", "").lower() == "gzip":
-			try:
-				body = gzip.decompress(body)
-			except OSError:
-				pass
-		return http_headers, body
-
-
-class TextCorpus:
-	"""A bounded in-memory text sample used for tokenizer fitting and evaluation."""
-
-	def __init__(self, documents):
-		self.documents = [str(document) for document in documents]
-		if not self.documents:
-			raise ValueError("TextCorpus cannot be empty")
-		self.tokens = None
-
-	def encode(self, tokenizer):
-		"""Encode each document, delimiting documents with the tokenizer's BOS ID."""
-		token_ids = [tokenizer.BOS_ID]
-		for document in self.documents:
-			token_ids.extend(tokenizer.encode(document))
-			token_ids.append(tokenizer.BOS_ID)
-		self.tokens = torch.tensor(token_ids, dtype=torch.long)
-		return self.tokens
+	def __getitem__(self, key):
+		start, end = self._offsets[key], self._offsets[key + 1]
+		sequence = np.array(self._tokens[start:end], dtype=np.uint8, copy=True)
+		return torch.from_numpy(sequence.astype(np.int64, copy=False))
 
 	def sample_batch(self, batch_size, block_size, device):
-		if self.tokens is None:
-			raise RuntimeError("Call encode(tokenizer) before requesting token batches")
-		if self.tokens.numel() <= block_size:
-			raise ValueError("Corpus is too short for the configured context window")
-
-		starts = torch.randint(self.tokens.numel() - block_size, (batch_size,))
+		if block_size != self.block_size:
+			raise ValueError("block_size does not match the dataset configuration")
+		starts = torch.randint(self._size - block_size, (batch_size,))
 		inputs = torch.stack([
-			self.tokens[start : start + block_size]
-			for start in starts
+			torch.from_numpy(np.asarray(self._tokens[start:start + block_size], dtype=np.int64))
+			for start in starts.tolist()
 		])
 		targets = torch.stack([
-			self.tokens[start + 1 : start + block_size + 1]
-			for start in starts
+			torch.from_numpy(np.asarray(self._tokens[start + 1:start + block_size + 1], dtype=np.int64))
+			for start in starts.tolist()
 		])
 		return inputs.to(device), targets.to(device)
 
 	def batches(self, block_size, device):
-		"""Yield non-overlapping next-token batches for full-corpus evaluation."""
-		if self.tokens is None:
-			raise RuntimeError("Call encode(tokenizer) before requesting token batches")
-		for start in range(0, self.tokens.numel() - 1, block_size):
-			end = min(start + block_size + 1, self.tokens.numel())
-			inputs = self.tokens[start : end - 1].unsqueeze(0).to(device)
-			targets = self.tokens[start + 1 : end].to(device)
+		if block_size != self.block_size:
+			raise ValueError("block_size does not match the dataset configuration")
+		for start in range(0, self._size - 1, block_size):
+			end = min(start + block_size + 1, self._size)
+			inputs = torch.from_numpy(np.asarray(self._tokens[start:end - 1], dtype=np.int64))
+			targets = torch.from_numpy(np.asarray(self._tokens[start + 1:end], dtype=np.int64))
 			if targets.numel():
-				yield inputs, targets
-
-
-class StreamingTextCorpus:
-	"""Turn a remote document stream into prefetched sequential token batches."""
-
-	def __init__(self, document_stream, tokenizer, *, max_documents=None, prefetch_batches=16):
-		if prefetch_batches < 1:
-			raise ValueError("prefetch_batches must be at least 1")
-		self.document_stream = document_stream
-		self.tokenizer = tokenizer
-		self.max_documents = max_documents
-		self._token_iterator = None
-		self._buffer = []
-		self._prefetch_batches = prefetch_batches
-		self._batch_queue = queue.Queue(maxsize=prefetch_batches)
-		self._stop_prefetch = threading.Event()
-		self._prefetch_thread = None
-		self._batch_config = None
-
-	def _tokens(self):
-		yield self.tokenizer.BOS_ID
-		for document in self.document_stream.iter_documents(max_documents=self.max_documents):
-			yield from self.tokenizer.encode(document)
-			yield self.tokenizer.BOS_ID
-
-	def _sample_cpu_batch(self, batch_size, block_size):
-		if self._token_iterator is None:
-			self._token_iterator = iter(self._tokens())
-
-		sequence_length = block_size + 1
-		needed = batch_size * sequence_length
-		while len(self._buffer) < needed:
-			try:
-				self._buffer.append(next(self._token_iterator))
-			except StopIteration as exc:
-				raise ValueError("CC-NEWS stream ended before a training batch could be formed") from exc
-
-		sequences = torch.tensor(self._buffer[:needed], dtype=torch.long).reshape(
-			batch_size, sequence_length
-		)
-		self._buffer = self._buffer[needed:]
-		return sequences[:, :-1], sequences[:, 1:]
-
-	def _enqueue_prefetched(self, item):
-		while not self._stop_prefetch.is_set():
-			try:
-				self._batch_queue.put(item, timeout=0.1)
-				return True
-			except queue.Full:
-				continue
-		return False
-
-	def _prefetch_worker(self, batch_size, block_size):
-		try:
-			while not self._stop_prefetch.is_set():
-				batch = self._sample_cpu_batch(batch_size, block_size)
-				if not self._enqueue_prefetched(("batch", batch)):
-					return
-		except Exception as e:
-			self._enqueue_prefetched(("error", e))
-
-	def sample_batch(self, batch_size, block_size, device):
-		config = (batch_size, block_size)
-		if self._prefetch_thread is None:
-			self._batch_config = config
-			self._prefetch_thread = threading.Thread(
-				target=self._prefetch_worker,
-				args=config,
-				name="text-corpus-prefetch",
-				daemon=True,
-			)
-			self._prefetch_thread.start()
-		elif config != self._batch_config:
-			raise ValueError("batch_size and block_size cannot change after prefetching starts")
-
-		kind, result = self._batch_queue.get()
-		if kind == "error":
-			raise result
-		inputs, targets = result
-		return inputs.to(device, non_blocking=True), targets.to(device, non_blocking=True)
+				yield inputs.unsqueeze(0).to(device), targets.to(device)
 
 	def close(self):
-		"""Stop the prefetch worker when training ends or is interrupted."""
-		self._stop_prefetch.set()
+		if self._tokens is not None:
+			self._tokens._mmap.close()
+			self._tokens = None
+		if hasattr(self._offsets, "_mmap"):
+			self._offsets._mmap.close()
+			self._offsets = None
+
+	def __getstate__(self):
+		state = self.__dict__.copy()
+		state["_tokens"] = None
+		return state
+
+
+
 
 ####################################
 
@@ -615,14 +459,26 @@ def _SDF_adjustment(frame, left_hand, right_hand):
 	frame = np.asarray(frame, dtype=np.float32).reshape(14, 3)
 	adjustments = np.zeros((14, 1), dtype=np.float32)
 	for idx, point in enumerate(frame):
-		hand = left_hand if idx < 8 else right_hand
-		adjustments[idx] = [vector_to_surface(point, hand.shape), hand.compressibility, hand.rest_point]
-	return np.concatenate((frame,adjustments), axis=-1)
+		hand = left_hand if idx < 7 else right_hand
+		adjustments[idx] = np.linalg.norm(vector_to_surface(point, hand.shape))
+	with_sdf = np.concatenate((frame,adjustments), axis=-1)
+	return np.concatenate((
+		frame[:2].reshape(-1),
+		with_sdf[:6].reshape(-1),
+		np.atleast_1d(left_hand.compressibility),
+		left_hand.rest_point,
+		frame[7:9].reshape(-1),
+		with_sdf[6:].reshape(-1),
+		np.atleast_1d(right_hand.compressibility),
+		right_hand.rest_point))
+
 
 def transform(frames, left_hand, right_hand):
 	""" for each finger, in each frame report the displacement from that finger to the surface of the corresponding model, and also compressibility"""
-	func = lambda l: _SDF_adjustment(l, left_hand, right_hand)
-	return np.diff(np.vectorize(func)(frames))
+	return np.diff(
+		np.asarray([_SDF_adjustment(frame, left_hand, right_hand) for frame in frames]),
+		axis=0,
+	)
 
 
 prev_frame = None

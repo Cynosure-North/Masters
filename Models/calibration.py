@@ -17,20 +17,21 @@ class Hand:
 
 def _finger_spread(frames):
 	"""Return a spread score for each frame."""
-	thumb = frames[..., 0, :]
+	wrist = frames[..., 2, :]
+	thumb = frames[..., 2, :]
 	index = frames[..., 1, :]
 	little = frames[..., -1, :]
-	return np.linalg.norm(thumb - index, axis=-1) + np.linalg.norm(thumb - little, axis=-1)
+	return np.linalg.norm(thumb - index, axis=-1) + np.linalg.norm(wrist - little, axis=-1)
 
 def _find_reference(frame_sequences):
 	"""The reference point is when the fingers are spread out, resting on the surface."""
-	flattened = frame_sequences.flatten()
+	flattened = np.concatenate(frame_sequences)
 	scores = _finger_spread(flattened)
 	count = min(100, len(flattened))
 	reference_frames = flattened[np.argpartition(scores, -count)[-count:]]
 	return np.mean(reference_frames, axis=0), reference_frames
 
-def _ideal_pipeline(frame_sequences: np.ndarray):
+def _ideal_pipeline(frame_sequences: list[np.ndarray]):
 	"""Return the frames belonging to the final pinch pulse.
 
 	The calibration motion is expected to start from a relatively open hand, then go into a shallow
@@ -39,7 +40,7 @@ def _ideal_pipeline(frame_sequences: np.ndarray):
 	subsequent local minimum. """
 	
 	surface_contour_frames = []
-	squeeze_distances = [None * len(frame_sequences)]
+	squeeze_distances = [None for _ in range(len(frame_sequences))]
 	successful = 0
 
 	for idx, sequence in enumerate(frame_sequences):
@@ -89,11 +90,11 @@ def _ideal_pipeline(frame_sequences: np.ndarray):
 	if successful < 3:
 		return None, None
 
-	return surface_contour_frames, sum(squeeze_distances) / successful
+	return np.concatenate(surface_contour_frames), sum(squeeze_distances) / successful
 
 
 def _only_squeeze(frame_sequences):
-	squeeze_distances = [None * len(frame_sequences)]
+	squeeze_distances = [None for _ in range(len(frame_sequences))]
 	successful = 0
 
 	for idx, sequence in enumerate(frame_sequences):
@@ -105,11 +106,12 @@ def _only_squeeze(frame_sequences):
 		# It doesn't matter if they wave their hands around, because this only considers the finger
 		# spread, and that's at its extremes when squeezing and stretching
 		squeeze_distances[idx] = np.max(spread) - np.min(spread)
+		successful += 1
 
 	return sum(squeeze_distances) / successful
 
 
-def _fit_floor(frames, reference_hand_position):
+def _fit_floor(frames: np.ndarray, reference_hand_position: np.ndarray):
 	"""Fit a surface to the lower envelope of hand points near the reference pose."""
 
 	if reference_hand_position is not None:
@@ -119,11 +121,38 @@ def _fit_floor(frames, reference_hand_position):
 		else:
 			raise RuntimeError("No points close enough to reference to find a floor")
 
+	frames = frames.reshape(-1, 3)
+
 	# A local XY neighbourhood avoids selecting only the globally lowest part of an inclined or curved surface.
-	xy_distances = np.linalg.norm(frames[:, None, :2] - frames[None, :, :2], axis=-1)
-	local_floor = np.min(
-		np.where(xy_distances <= 0.02, frames[None, :, 2], np.inf), axis=-1)
+	# Spatial buckets find the neighbours without allocating an O(n²) distance matrix.
+	neighbourhood_radius = 0.02
+	bucket_coordinates = np.floor(frames[:, :2] / neighbourhood_radius).astype(np.int64)
+	buckets: dict[tuple[int, int], list[int]] = {}
+	for index, coordinate in enumerate(bucket_coordinates):
+		buckets.setdefault((int(coordinate[0]), int(coordinate[1])), []).append(index)
+
+	local_floor = np.empty(len(frames), dtype=frames.dtype)
+	for (bucket_x, bucket_y), bucket_indices in buckets.items():
+		candidate_indices = []
+		for offset_x in (-1, 0, 1):
+			for offset_y in (-1, 0, 1):
+				candidate_indices.extend(buckets.get((bucket_x + offset_x, bucket_y + offset_y), ()))
+
+		targets = np.asarray(bucket_indices, dtype=np.intp)
+		candidates = np.asarray(candidate_indices, dtype=np.intp)
+		candidate_xy = frames[candidates, :2]
+		for start in range(0, len(targets), 1024):
+			targets_chunk = targets[start:start + 1024]
+			xy_deltas = candidate_xy[None, :, :] - frames[targets_chunk, None, :2]
+			squared_distances = np.sum(xy_deltas * xy_deltas, axis=-1)
+			local_floor[targets_chunk] = np.min(
+				np.broadcast_to(frames[candidates, 2], squared_distances.shape),
+				axis=1,
+				where=squared_distances <= neighbourhood_radius**2,
+				initial=np.inf )
+
 	floor_points = frames[frames[:, 2] <= local_floor + 0.2]
+
 	if len(floor_points) < 3:
 		floor_points = frames[np.argsort(frames[:, 2])[:3]]
 
@@ -131,21 +160,20 @@ def _fit_floor(frames, reference_hand_position):
 
 def _rest_values(reference_hand, shape):
 	# midpoint between fingers and wrist
-	avg_finger = np.mean(reference_hand[2:])
-	reference_point = np.mean((avg_finger, reference_hand[0]))
+	avg_finger = np.mean(reference_hand[2:], axis=0)
+	reference_point = np.mean((avg_finger, reference_hand[0]), axis=0)
 
 	rest_point = reference_point + vector_to_surface(reference_point, shape)
 	rest_uv = surface_uv(rest_point, shape)
 
 	return rest_point, rest_uv
 
-def calibrate_hand(calibration_sequences: np.ndarray, surface: str) -> Hand:
-	calibration_sequences = calibration_sequences[:, :, 2:, :]	# Drop wrist points
-
+def calibrate_hand(calibration_sequences: list[np.ndarray], surface: str) -> Hand:
 	reference_hand_position, reference_frames = _find_reference(calibration_sequences)
+	calibration_sequences = [sequence[2:] for sequence in calibration_sequences] # Drop wrist points
 	surface_contour_frames, squeeze_amount = _ideal_pipeline(calibration_sequences)
 
-	if surface_contour_frames:
+	if surface_contour_frames is not None:
 
 		shape_fit = _fit_floor(surface_contour_frames, None)
 		rest_point, rest_uv = _rest_values(reference_hand_position, shape_fit)
@@ -156,11 +184,15 @@ def calibrate_hand(calibration_sequences: np.ndarray, surface: str) -> Hand:
 	# Participants messed up in consistent ways
 	# On the cushions they would only squeeze (I don't recall that happening when typing on legs)
 	# And of course they can't squeeze hard surfaces
+	#
+	# So if they're on a cushion the best we can do is try and figure out the rough shape from the
+	# frames we know they weren't squeezing on
+	# And if they're on a hard surface, the fingertips are going to be on/above the surface every frame
 	
 	elif surface == "cushion":
 
-		squeeze_amount = _only_squeeze(calibration_sequences, reference_hand_position)
-		shape_fit = _fit_floor(reference_frames)
+		squeeze_amount = _only_squeeze(calibration_sequences)
+		shape_fit = _fit_floor(reference_frames[:, 2:], None)
 		rest_point, rest_uv = _rest_values(reference_hand_position, shape_fit)
 
 		return Hand(shape_fit, squeeze_amount, rest_point, rest_uv)
@@ -169,7 +201,7 @@ def calibrate_hand(calibration_sequences: np.ndarray, surface: str) -> Hand:
 		# unfortunately I messed up the data gathering and can't test that
 
 	else:
-		shape_fit = _fit_floor(calibration_sequences, reference_hand_position)
+		shape_fit = _fit_floor(np.concatenate(calibration_sequences), reference_hand_position)
 		rest_point, rest_uv = _rest_values(reference_hand_position, shape_fit)
 			
 		return Hand(shape_fit, 0, rest_point, rest_uv)
