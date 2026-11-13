@@ -9,10 +9,8 @@ import numpy as np
 from pathlib import Path
 from torch.utils.data import DataLoader
 
-from data import chars, TestMotionDatset
+from data import chars, TestMotionDataset
 import TCN
-import ref_beamsearch
-
 
 
 alphabet = chars + ['-']	# CTC blank (last column)
@@ -259,8 +257,9 @@ def tune_alpha_beta(
 	for alpha in alpha_values:
 		for beta in beta_values:
 			score = 1 - (sum(
-				editdistance.eval(ref_beamsearch.prefix_beam_search(ctc, beam_searcher.llm.get_word_probability, alpha=alpha, beta=beta), expected)
-				# prefix_beam_search(ctc, beam_searcher, alpha=alpha, beta=beta, alphabet=alphabet) == expected
+				editdistance.eval(
+					prefix_beam_search(ctc, beam_searcher, alpha=alpha, beta=beta, alphabet=alphabet),
+					expected)
 				for ctc, expected in zip(ctc_sequences, texts)
 			) / sum (len(text) for text in texts))
 
@@ -291,7 +290,7 @@ def run_tuning():
 		device = next(tcn.parameters()).device
 		loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
 		loader = DataLoader(
-			TestMotionDatset(train_path),
+			TestMotionDataset(train_path),
 			collate_fn=TCN.collate_batch,
 			**loader_kwargs)
 
@@ -309,9 +308,7 @@ def run_tuning():
 		print("Loaded data, running sweep")
 
 	import LLM
-	language_model = LLM.instantiate_model(
-		llm_path,
-		compile_model=True)
+	language_model = LLM.instantiate_model(llm_path)
 	alpha, beta, score = tune_alpha_beta(ctc_outputs, ctc_labels, language_model)
 
 	print(f"Best alpha: {alpha}")
@@ -384,20 +381,15 @@ def test():
 	ctc_sequences, texts = _load_sentence_named_ctc(test_dir)
 
 	import LLM
-	language_model = LLM.instantiate_model(
-		llm_path,
-		compile_model=True,
-	)
+	language_model = LLM.instantiate_model(llm_path)
 	beam_searcher = BeamSearcher(language_model)
 	for ctc, expected_text in zip(ctc_sequences, texts):
 		greedy_out = greedy_decoder(ctc)
 		pbs_out = prefix_beam_search(ctc, beam_searcher)
-		# ref_pbs_out = ref_beamsearch.prefix_beam_search(ctc, beam_searcher.llm.get_word_probability)
 		print()
 		print(f"Reference:     {expected_text}")
 		print(f"Greedy Decode: {greedy_out}")
 		print(f"My PBS:        {pbs_out}")
-		# print(f"Ref PBS:       {ref_pbs_out}")
 	
 
 if __name__ == "__main__":

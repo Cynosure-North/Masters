@@ -123,7 +123,7 @@ def train_model(
 	device=None,
 	gradient_clip=None,
 	use_amp=True,
-	use_compile=False,
+	compile_model=hasattr(torch, "compile"),
 	seed=SEED,
 	use_augmentation=True,
 ):
@@ -131,7 +131,7 @@ def train_model(
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 	compiled_model = None
-	if use_compile and hasattr(torch, "compile"):
+	if compile_model and hasattr(torch, "compile"):
 		compiled_model = model
 		model = torch.compile(model, dynamic=True)
 
@@ -219,14 +219,14 @@ def test_model(
 	model,
 	dataloader,
 	use_amp=True,
-	use_compile=False,
+	compile_model=hasattr(torch, "compile"),
 ):
 	"""Evaluate and return average loss and masked-token accuracy."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 
 	compiled_model = None
-	if use_compile and hasattr(torch, "compile"):
+	if compile_model and hasattr(torch, "compile"):
 		compiled_model = model
 		model = torch.compile(model, dynamic=True)
 

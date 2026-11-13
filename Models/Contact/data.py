@@ -269,7 +269,7 @@ def transform(frames, left_hand, right_hand):
 		if len(val) == 0:
 			continue
 		elif len(val) > 1:
-			raise ValueError("Only one contact point per frame")
+			raise ValueError("Only one contact point per frame - {val}")
 		else:
 			hand = left_hand if val[0][0] == 'l' else right_hand
 			result.append(_unwrap_adjustment(frames[idx], val[0], hand.shape, hand.compressibility, hand.rest_uv))

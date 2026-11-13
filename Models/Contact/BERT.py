@@ -282,7 +282,7 @@ def train_model(
 	scheduler=None,
 	loss_fn=None,
 	use_amp=True,
-	use_compile=False,
+	compile_model=hasattr(torch, "compile"),
 	checkpoint_interval=50_000,
 	seed=SEED,
 ):
@@ -290,7 +290,7 @@ def train_model(
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 	compiled_model = None
-	if use_compile and hasattr(torch, "compile"):
+	if compile_model and hasattr(torch, "compile"):
 		compiled_model = model
 		model = torch.compile(model, dynamic=True)
 	loss_fn = loss_fn or nn.CrossEntropyLoss(ignore_index=-100)
@@ -361,14 +361,14 @@ def test_model(
 	tokenizer,
 	mask_prob=0.15,
 	use_amp=True,
-	use_compile=False,
+	compile_model=hasattr(torch, "compile"),
 	seed=SEED,
 ):
 	"""Evaluate a character MLM and return average loss and masked-token accuracy."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 	compiled_model = None
-	if use_compile and hasattr(torch, "compile"):
+	if compile_model and hasattr(torch, "compile"):
 		compiled_model = model
 		model = torch.compile(model, dynamic=True)
 	model.eval()
@@ -438,7 +438,7 @@ def main():
 		tokenizer,
 		checkpoint_path=save_path.with_stem(save_path.stem.replace("final_", "")),
 		use_amp=True,
-		use_compile=False)
+		compile_model=False)
 		
 
 	print("training complete")

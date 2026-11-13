@@ -21,8 +21,8 @@ cache_dir.mkdir(exist_ok=True)
 typo_ratios = {"table": [], "cushion": [], "pipe": [], "legs": []}
 
 def file_generator(data_folder):
-	for participant in data_folder.iterdir():
-		for surface in participant.iterdir():
+	for participant in sorted(data_folder.iterdir()):
+		for surface in sorted(participant.iterdir()):
 
 			if surface.is_file():
 				continue
@@ -37,7 +37,7 @@ def file_generator(data_folder):
 
 			calibration_files = set(surface.glob("calibration_[0-9]*"))
 			sentence_files = [
-				path for path in surface.iterdir()
+				path for path in sorted(surface.iterdir())
 				if path.is_file() and path not in calibration_files and "_typo" not in path.stem]
 
 
@@ -115,10 +115,10 @@ def preprocess():
 				# deal, so only checking one file is fine
 			print(f"Processing {surface}/{split}/{filename}")
 
-			contact_frames = contact.transform(frames, left_hand, right_hand)
-			np.save(contact_data_dir / surface / split / filename, contact_frames)
-			# Simplified version only has UV coordinates of contact points and hand rest position
-			np.save(contact_data_dir_simple / surface / split / filename, contact_frames[:, :3])
+			# contact_frames = contact.transform(frames, left_hand, right_hand)
+			# np.save(contact_data_dir / surface / split / filename, contact_frames)
+			# # Simplified version only has UV coordinates of contact points and hand rest position
+			# np.save(contact_data_dir_simple / surface / split / filename, contact_frames[:, :3])
 
 			np.save(motion_data_dir / surface / split / filename, motion.transform(frames, left_hand, right_hand))
 			np.save(motion_data_dir_raw / surface / split / filename, np.diff(frames))

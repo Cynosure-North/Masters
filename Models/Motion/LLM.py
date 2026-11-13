@@ -196,7 +196,7 @@ def train_model(
 	batch_size=32,
 	block_size=256,
 	validation_interval=5000,
-	compile_model=False,
+	compile_model=hasattr(torch, "compile"),
 ):
 	"""Train the character LM and restore its best validation checkpoint."""
 	if validation_interval < 1:
@@ -208,9 +208,7 @@ def train_model(
 	best_checkpoint = None
 	step = 0
 	network = model
-	if compile_model:
-		if not hasattr(torch, "compile"):
-			raise RuntimeError("This PyTorch version does not provide torch.compile")
+	if compile_model and hasattr(torch, "compile"):
 		network = torch.compile(model)
 	use_amp = model.device.type == "cuda"
 	scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
@@ -256,9 +254,9 @@ def train_model(
 	return model
 
 
-def main(steps=None, *, batch_size=128, compile_model=False):
+def main(steps=None, *, batch_size=128):
 	"""Train and evaluate a character LM using Common Crawl News."""
-	save_path = Path(__file__).resolve().parent / "trained" / "final_CharacterLM.pth"
+	save_path = Path(__file__).resolve().parent / "trained" / "final_LLM.pth"
 
 	model = instantiate_model(save_path)
 
@@ -288,7 +286,7 @@ def main(steps=None, *, batch_size=128, compile_model=False):
 		checkpoint_path=save_path.with_stem(save_path.stem.replace("final_", "")),
 		steps=steps,
 		batch_size=batch_size,
-		compile_model=compile_model)
+		compile_model=hasattr(torch, "compile"))
 	save_checkpoint(model, save_path)
 
 	print("training complete")

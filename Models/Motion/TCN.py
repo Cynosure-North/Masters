@@ -2,7 +2,6 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from pathlib import Path
-from Models.Contact.BiGRU import VARIANT
 from data import TestMotionDataset, MotionDataset, chars
 
 VARIANT = "3d-raw"
