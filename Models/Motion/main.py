@@ -76,11 +76,8 @@ def interactive(tnn, llm):
 	# Else use the off-frames to run the llm in batches (of 4?) to manage performance
 
 def main():
-	print("######### Training LLM")
-	LLM.main(steps=50_000)
+	errors = []
 
-	print("######### Training TCN")
-	TCN.main(variant="")
 	print("######### Training TCN (3d-raw)")
 	TCN.main(variant="3d-raw")
 	print("######### Training TCN (3d)")
@@ -88,6 +85,9 @@ def main():
 
 	print("######### Tuning Beam Search")
 	BeamSearch.run_tuning()
+
+	print("######### Training LLM (indefinitely)")
+	LLM.main()
 
 if __name__ == "__main__":
 	main()

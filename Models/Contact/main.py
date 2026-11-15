@@ -104,7 +104,7 @@ def train():
 	BiGRU.main(variant="3d")
 
 	print("######### Training BERT")
-	BERT.main()
+	BERT.main(epochs=10)
 
 	print("######### Training SANCD")
 	SANCD.main(variant="")

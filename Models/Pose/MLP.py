@@ -81,6 +81,7 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 	temporary_path.replace(destination)
 
 	if cleanup_previous:
+		cleanup_previous = Path(cleanup_previous)
 		for candidate in destination.parent.iterdir():
 			if candidate.is_dir() and candidate.name.startswith(cleanup_previous.name):
 				candidate.rmdir()
@@ -173,10 +174,10 @@ def train_model(
 				stale_epochs = 0
 
 				save_checkpoint(model, checkpoint)
-			else:
+			elif patience != -1:
 				stale_epochs += 1
 				message += f", patience: {stale_epochs}/{patience}"
-				if stale_epochs >= patience and patience != -1:
+				if stale_epochs >= patience:
 					print(message)
 					print("Early stopping")
 					break

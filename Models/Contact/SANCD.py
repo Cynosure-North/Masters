@@ -5,7 +5,7 @@ from pathlib import Path
 
 import BiGRU
 import BERT
-from data import TestGeometricDataset, pad_variable
+from data import TestGeometricDataset, GeometricDataset, pad_variable
 
 SEED = 0
 VARIANT = "3d-simple"
@@ -64,6 +64,7 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 	temporary_path.replace(destination)
 
 	if cleanup_previous:
+		cleanup_previous = Path(cleanup_previous)
 		for candidate in destination.parent.iterdir():
 			if candidate.is_dir() and candidate.name.startswith(cleanup_previous.name):
 				candidate.rmdir()
@@ -241,14 +242,13 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _bigru_path=N
 	bert_path = project_dir / "trained" / "best_BERT.pth"
 	save_path = _save_path or project_dir / "trained" / "final_SANCD"
 	data_dir = project_dir / "data" / (variant or "geometric")
+	train_path = _train_path or data_dir / "train.csv"
+	validation_path = _validation_path or data_dir / "validation.csv"
+	test_path = _test_path or data_dir / "test.csv"
 
 	loader_kwargs = { "batch_size": 64, "collate_fn": pad_variable, "num_workers": 2, "pin_memory": True }
 
 	if not VARIANT:
-		train_path = _train_path or data_dir / "train.csv"
-		validation_path = _validation_path or data_dir / "validation.csv"
-		test_path = _test_path or data_dir / "test.csv"
-
 		train_dataloader = DataLoader(TestGeometricDataset(train_path), shuffle=True, **loader_kwargs)
 		validation_dataloader = DataLoader(TestGeometricDataset(validation_path), shuffle=False, **loader_kwargs)
 		test_dataloader = DataLoader(TestGeometricDataset(test_path), shuffle=False, **loader_kwargs)
@@ -256,13 +256,9 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _bigru_path=N
 		bigru_path = save_path.with_stem(f"{save_path.stem}_{variant}")
 		save_path = save_path.with_stem(f"{save_path.stem}_{variant}")
 
-		train_path = _train_path or data_dir / variant / "train.csv"
-		validation_path = _validation_path or data_dir / variant / "validation.csv"
-		test_path = _test_path or data_dir / variant / "test.csv"
-
-		train_dataloader = DataLoader(TestGeometricDataset(train_path), shuffle=True, **loader_kwargs)
-		validation_dataloader = DataLoader(TestGeometricDataset(validation_path), shuffle=False, **loader_kwargs)
-		test_dataloader = DataLoader(TestGeometricDataset(test_path), shuffle=False, **loader_kwargs)
+		train_dataloader = DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)
+		validation_dataloader = DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)
+		test_dataloader = DataLoader(GeometricDataset(test_path), shuffle=False, **loader_kwargs)
 
 	model = instantiate_model(save_path, bigru_path=bigru_path, bert_path=bert_path)
 

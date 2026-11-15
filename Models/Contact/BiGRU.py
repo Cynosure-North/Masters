@@ -76,6 +76,7 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 	temporary_path.replace(destination)
 
 	if cleanup_previous:
+		cleanup_previous = Path(cleanup_previous)
 		for candidate in destination.parent.iterdir():
 			if candidate.is_file() and candidate.suffix == ".pth" and candidate.name.startswith(cleanup_previous):
 				candidate.unlink()
@@ -199,7 +200,7 @@ def train_model(
 				stale_epochs = 0
 
 				save_checkpoint(model, checkpoint)
-			else:
+			elif patience != -1:
 				stale_epochs += 1
 				message += f", patience: {stale_epochs}/{patience}"
 				if stale_epochs >= patience:
@@ -271,15 +272,14 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	project_dir = Path(__file__).resolve().parent
 	save_path = _save_path or project_dir / "trained" / "final_BiGRU.pth"
 	data_dir = project_dir / "data" / (variant or "geometric")
+	train_path = _train_path or data_dir / "train"
+	validation_path = _validation_path or data_dir / "validation"
+	test_path = _test_path or data_dir / "test"
 
 	loader_kwargs = {"batch_size": 64, "collate_fn": pad_variable, "num_workers": 2, "pin_memory": True}
 
 	if not variant:
 		model = instantiate_model(save_path)
-
-		train_path = _train_path or data_dir / "train.csv"
-		validation_path = _validation_path or data_dir / "validation.csv"
-		test_path = _test_path or data_dir / "test.csv"
 
 		train_dataloader = DataLoader(TestGeometricDataset(train_path), shuffle=True, **loader_kwargs)
 		validation_dataloader = DataLoader(TestGeometricDataset(validation_path), shuffle=False, **loader_kwargs)
@@ -293,10 +293,6 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 		else:
 			# Input is [uv, normal, tangent vectors, principal curvatures, compressibility] instead of [x, y]
 			model = instantiate_model(save_path, input_size=16, num_layers=3)
-
-		train_path = _train_path or data_dir / variant / "train"
-		validation_path = _validation_path or data_dir / variant / "validation"
-		test_path = _test_path or data_dir / variant / "test"
 
 		train_dataloader = DataLoader(TestGeometricDataset(train_path), shuffle=True, **loader_kwargs)
 		validation_dataloader = DataLoader(TestGeometricDataset(validation_path), shuffle=False, **loader_kwargs)

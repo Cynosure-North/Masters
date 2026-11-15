@@ -138,8 +138,9 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 	temporary_path.replace(destination)
 
 	if cleanup_previous:
+		cleanup_previous = Path(cleanup_previous)
 		for candidate in destination.parent.iterdir():
-			if candidate.is_file() and candidate.suffix == ".pth" and candidate.name.startswith(cleanup_previous.stem):
+			if candidate.is_file() and candidate.suffix == ".pth" and candidate.name.startswith(cleanup_previous):
 				candidate.unlink()
 
 def instantiate_model(model_path, **kwargs):
@@ -287,12 +288,12 @@ def main(steps=None, *, batch_size=128):
 		steps=steps,
 		batch_size=batch_size,
 		compile_model=hasattr(torch, "compile"))
-	save_checkpoint(model, save_path)
+	save_checkpoint(model, save_path,
+		cleanup_previous=save_path.stem.replace("final_", ""))
 
-	print("training complete")
-	loss, perplexity = test_model(trained_model, test_corpus)
-	print(f"Test Loss: {loss:.4f}")
-	print(f"Test Perplexity: {perplexity:.4f}")
+	# loss, perplexity = test_model(trained_model, test_corpus)
+	# print(f"Test Loss: {loss:.4f}")
+	# print(f"Test Perplexity: {perplexity:.4f}")
 	return trained_model
 
 

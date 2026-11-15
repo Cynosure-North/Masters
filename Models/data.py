@@ -1,5 +1,7 @@
 """Parse the raw data from the experiment, apply the relevant processing for each model, and save it to that model's data dir"""
 
+import hashlib
+from hmac import digest_size
 from pathlib import Path
 import numpy as np
 from calibration import calibrate_hand
@@ -10,15 +12,18 @@ import Motion.data as motion
 
 raw_data_folder = Path(r"H:\Research_Data\Morgana North(MHIT)\phase1")
 models_root = Path(__file__).resolve().parent 
-pose_data_dir = models_root / "Pose" / "data" / "training"
+# pose_data_dir = models_root / "Pose" / "data" / "training"
 contact_data_dir = models_root / "contact" / "data" / "3d"
 contact_data_dir_simple = models_root / "contact" / "data" / "3d-simple"
 motion_data_dir = models_root / "Motion" / "data" / "3d"
 motion_data_dir_raw = models_root / "Motion" / "data" / "3d-raw"
+# data_dirs = [pose_data_dir, contact_data_dir, contact_data_dir_simple, motion_data_dir, motion_data_dir_raw]
+data_dirs = [motion_data_dir, motion_data_dir_raw]
 cache_dir = models_root / "_cache"
 cache_dir.mkdir(exist_ok=True)
 
 typo_ratios = {"table": [], "cushion": [], "pipe": [], "legs": []}
+# Surface error averages -- table: 11.83% cushion: 13.38% pipe: 23.19% legs: 20.05% 
 
 def file_generator(data_folder):
 	for participant in sorted(data_folder.iterdir()):
@@ -28,11 +33,8 @@ def file_generator(data_folder):
 				continue
 
 			for split in ["train", "validation", "test"]:
-				# (pose_data_dir / surface.stem / split).mkdir(parents=True, exist_ok=True)
-				(contact_data_dir / surface.stem / split).mkdir(parents=True, exist_ok=True)
-				(contact_data_dir_simple / surface.stem / split).mkdir(parents=True, exist_ok=True)
-				(motion_data_dir / surface.stem / split).mkdir(parents=True, exist_ok=True)
-				(motion_data_dir_raw / surface.stem / split).mkdir(parents=True, exist_ok=True)
+				for folder in data_dirs:
+					(folder / split / surface.stem).mkdir(parents=True, exist_ok=True)
 
 
 			calibration_files = set(surface.glob("calibration_[0-9]*"))
@@ -105,23 +107,25 @@ def preprocess():
 			# pose.fit_scaler(frames)
 			
 			split = ["validation", "test", "validation", "test", "validation", "test",
-			 "train", "train", "train", "train", "train"][hash(filename) % 10]
+			 "train", "train", "train", "train", "train"][
+				 int(hashlib.sha256(filename.encode('utf-8')).hexdigest(), 16) % 10 ]
+			output_file = Path(split, surface, f"{filename}.npy")
 
-			if (contact_data_dir / surface / split / filename).exists():
-				print(f"Skipping existing file: {surface}/{split}/{filename}")
+			if all([(folder / output_file).exists() for folder in data_dirs]):
+				print(f"Skipping existing file: {output_file}")
 				continue
 				# It's fairly unlikely the code will get interrupted in between save statements
 				# and if it does and one or two files aren't saved as training data it's not a huge
 				# deal, so only checking one file is fine
-			print(f"Processing {surface}/{split}/{filename}")
+			print(f"Processing {output_file}")
 
-			# contact_frames = contact.transform(frames, left_hand, right_hand)
-			# np.save(contact_data_dir / surface / split / filename, contact_frames)
-			# # Simplified version only has UV coordinates of contact points and hand rest position
-			# np.save(contact_data_dir_simple / surface / split / filename, contact_frames[:, :3])
+			contact_frames = contact.transform(frames, left_hand, right_hand)
+			np.save(contact_data_dir / output_file, contact_frames)
+			# Simplified version only has UV coordinates of contact points and hand rest position
+			np.save(contact_data_dir_simple / output_file, contact_frames[:, :3])
 
-			np.save(motion_data_dir / surface / split / filename, motion.transform(frames, left_hand, right_hand))
-			np.save(motion_data_dir_raw / surface / split / filename, np.diff(frames))
+			# np.save(motion_data_dir / output_file, motion.transform(frames, left_hand, right_hand))
+			# np.save(motion_data_dir_raw / output_file, np.diff(frames, axis=0))
 
 	# for _, sentences, _, _ in file_generator(raw_data_folder):
 	# 	for _, frames in sentences:

@@ -161,6 +161,7 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 	temporary_path.replace(destination)
 
 	if cleanup_previous:
+		cleanup_previous = Path(cleanup_previous)
 		for candidate in destination.parent.iterdir():
 			if candidate.is_file() and candidate.suffix == ".pth" and candidate.name.startswith(cleanup_previous.stem):
 				candidate.unlink()
@@ -414,7 +415,7 @@ def test_model(
 	return total_loss / batch_count, accuracy
 
 
-def main():
+def main(epochs=3):
 	project_dir = Path(__file__).resolve().parent
 	save_path = project_dir / "trained" / "final_BERT.pth"
 
@@ -437,6 +438,7 @@ def main():
 		dataloader,
 		tokenizer,
 		checkpoint_path=save_path.with_stem(save_path.stem.replace("final_", "")),
+		epochs=epochs,
 		use_amp=True,
 		compile_model=False)
 		

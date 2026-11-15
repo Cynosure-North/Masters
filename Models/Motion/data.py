@@ -41,6 +41,14 @@ class MotionDataset(torch.utils.data.Dataset):
 		if not self.files:
 			raise ValueError(f"Motion dataset directory is empty: {self.path}")
 
+		first_features = np.load(self.files[0], allow_pickle=False)
+		if first_features.ndim < 2 or first_features.shape[0] == 0:
+			raise ValueError(
+				f"Motion record must contain at least one feature frame: {self.files[0]}")
+		if not np.issubdtype(first_features.dtype, np.number):
+			raise ValueError(f"Motion record must contain numeric features: {self.files[0]}")
+		self.input_features = int(np.prod(first_features.shape[1:]))
+
 	def __len__(self):
 		return len(self.files)
 
@@ -59,10 +67,16 @@ class MotionDataset(torch.utils.data.Dataset):
 		except (OSError, ValueError) as exc:
 			raise ValueError(f"Could not load numeric motion features from {file_path}") from exc
 
-		if features.ndim != 2 or features.shape[0] == 0:
+		if features.ndim < 2 or features.shape[0] == 0:
 			raise ValueError(f"Motion record {idx} must contain at least one feature frame")
 		if not np.issubdtype(features.dtype, np.number):
 			raise ValueError(f"Motion record {idx} must contain numeric features")
+		feature_count = int(np.prod(features.shape[1:]))
+		if feature_count != self.input_features:
+			raise ValueError(
+				f"Motion record {idx} has {feature_count} features per frame; "
+				f"expected {self.input_features}")
+		features = features.reshape(features.shape[0], feature_count)
 
 		targets = torch.tensor([chars.index(char) for char in label], dtype=torch.long)
 		return torch.from_numpy(features.astype(np.float32, copy=False)), targets, len(targets)

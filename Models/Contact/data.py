@@ -48,12 +48,6 @@ class GeometricDataset(torch.utils.data.Dataset):
 			raise ValueError(
 				f"Could not load numeric geometric features from {file_path}") from exc
 
-		if features.ndim != 2 or features.shape[0] == 0:
-			raise ValueError(
-				f"Geometric record {idx} must contain at least one feature frame")
-		if not np.issubdtype(features.dtype, np.number):
-			raise ValueError(f"Geometric record {idx} must contain numeric features")
-
 		labels = torch.tensor([char_to_idx[char] for char in label], dtype=torch.long)
 		return labels, torch.from_numpy(features.astype(np.float32, copy=False))
 
