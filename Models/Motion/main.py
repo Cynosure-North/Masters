@@ -64,16 +64,35 @@
 # 4.76M parameters. This language model was trained on using a window of 500 characters on text
 # sampled from 2 million articles in the CC-News dataset.
 
+from pathlib import Path
+import data
 import LLM
 import TCN
 import BeamSearch
 
-def interactive(tnn, llm):
-	pass
-	# TODO: Interactive mode for motion
-	# Run at 60fps
-	# If a new keypress has come in from the TNN update the next char
-	# Else use the off-frames to run the llm in batches (of 4?) to manage performance
+transform = None
+model = None
+bs = None
+def _interactive(frame):
+	if (data := transform(frame)) is not None:
+		return bs(model(data))
+
+	return None
+
+def init(new_model):
+	global transform, model, bs
+	model_dir = Path(__file__).parent / "trained"
+
+	if new_model == "raw":
+		transform = data.interactive_diff
+		model = TCN.instantiate_model(model_dir / "final_TCN_3d_simple.pth")
+	else:
+		transform = data.interactive_transform
+		model = TCN.instantiate_model(model_dir / "final_TCN_3d.pth")
+
+	bs = BeamSearch.BeamSearcher(model_dir / "final_LLM.pth").incremental_prefix_beam_search
+
+	return _interactive
 
 def main():
 	errors = []

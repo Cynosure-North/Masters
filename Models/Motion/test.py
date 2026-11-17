@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from data import chars, TestMotionDatset
+from data import chars, TestMotionDataset
 
 SEED = 0
 dir_path = Path(r"C:\Users\mno64\Datasets\How we type\Motion Capture")
@@ -188,7 +188,7 @@ def main():
 					predicted_text = prefix_beam_search(
 						sample_logits,
 						beam_searcher)
-					expected_text = "".join(chars[token - 1] for token in label.tolist())
+					expected_text = "".join(chars[token] for token in label.tolist())
 
 					incorrect_chars += editdistance.eval(expected_text, predicted_text)
 					total_chars += int(target_length)

@@ -64,9 +64,8 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 	temporary_path.replace(destination)
 
 	if cleanup_previous:
-		cleanup_previous = Path(cleanup_previous)
 		for candidate in destination.parent.iterdir():
-			if candidate.is_dir() and candidate.name.startswith(cleanup_previous.name):
+			if candidate.is_dir() and candidate.name.startswith(cleanup_previous):
 				candidate.rmdir()
 
 def instantiate_model(model_path, **kwargs):

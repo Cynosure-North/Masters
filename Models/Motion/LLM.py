@@ -140,7 +140,7 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 	if cleanup_previous:
 		cleanup_previous = Path(cleanup_previous)
 		for candidate in destination.parent.iterdir():
-			if candidate.is_file() and candidate.suffix == ".pth" and candidate.name.startswith(cleanup_previous):
+			if candidate.is_file() and candidate.suffix == ".pth" and candidate.name.startswith(cleanup_previous.stem):
 				candidate.unlink()
 
 def instantiate_model(model_path, **kwargs):
@@ -214,7 +214,7 @@ def train_model(
 	use_amp = model.device.type == "cuda"
 	scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 	try:
-		while steps is None or step < steps:
+		while step != steps:
 			step += 1
 			model.train()
 			inputs, targets = train_corpus.sample_batch(batch_size, block_size, model.device)

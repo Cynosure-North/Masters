@@ -78,7 +78,7 @@ def save_checkpoint(model, destination, cleanup_previous=None):
 	if cleanup_previous:
 		cleanup_previous = Path(cleanup_previous)
 		for candidate in destination.parent.iterdir():
-			if candidate.is_file() and candidate.suffix == ".pth" and candidate.name.startswith(cleanup_previous):
+			if candidate.is_file() and candidate.suffix == ".pth" and candidate.name.startswith(cleanup_previous.stem):
 				candidate.unlink()
 
 
@@ -182,7 +182,7 @@ def train_model(
 			epoch_loss += loss.item()
 
 		epoch_loss /= batch_count
-		message = f"Epoch {epoch:<3n} -- train loss: {epoch_loss:.6f}"
+		message = f"Epoch {epoch:<3n} -- train loss: {epoch_loss:9.6f}"
 
 		if validation_dataloader is not None:
 			validation_loss, _ = test_model(
@@ -190,7 +190,7 @@ def train_model(
 				validation_dataloader,
 				use_amp=use_amp)
 			model.train()
-			message += f", validation loss: {validation_loss:.6f}"
+			message += f", validation loss: {validation_loss:9.6f}"
 
 			if validation_loss < best_validation_loss - min_delta:
 				checkpoint = checkpoint_path.with_stem(f"{checkpoint_path.stem}_{epoch}")

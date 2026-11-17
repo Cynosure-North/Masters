@@ -1,5 +1,6 @@
 """Parse the raw data from the experiment, apply the relevant processing for each model, and save it to that model's data dir"""
 
+from collections import defaultdict
 import hashlib
 from hmac import digest_size
 from pathlib import Path
@@ -8,6 +9,7 @@ from calibration import calibrate_hand
 import Pose.data as pose
 import Contact.data as contact
 import Motion.data as motion
+from collections import defaultdict
 
 
 raw_data_folder = Path(r"H:\Research_Data\Morgana North(MHIT)\phase1")
@@ -22,7 +24,7 @@ data_dirs = [motion_data_dir, motion_data_dir_raw]
 cache_dir = models_root / "_cache"
 cache_dir.mkdir(exist_ok=True)
 
-typo_ratios = {"table": [], "cushion": [], "pipe": [], "legs": []}
+typo_ratios = defaultdict(lambda: defaultdict(list))
 # Surface error averages -- table: 11.83% cushion: 13.38% pipe: 23.19% legs: 20.05% 
 
 def file_generator(data_folder):
@@ -43,7 +45,7 @@ def file_generator(data_folder):
 				if path.is_file() and path not in calibration_files and "_typo" not in path.stem]
 
 
-			typo_ratios[surface.stem].append(
+			typo_ratios[participant.stem][surface.stem].append(
 				len(list(surface.glob("*_typo"))) / len(sentence_files))
 
 
@@ -119,13 +121,13 @@ def preprocess():
 				# deal, so only checking one file is fine
 			print(f"Processing {output_file}")
 
-			contact_frames = contact.transform(frames, left_hand, right_hand)
-			np.save(contact_data_dir / output_file, contact_frames)
-			# Simplified version only has UV coordinates of contact points and hand rest position
-			np.save(contact_data_dir_simple / output_file, contact_frames[:, :3])
+			# contact_frames = contact.transform(frames, left_hand, right_hand)
+			# np.save(contact_data_dir / output_file, contact_frames)
+			# # Simplified version only has UV coordinates of contact points and hand rest position
+			# np.save(contact_data_dir_simple / output_file, contact_frames[:, :4])
 
-			# np.save(motion_data_dir / output_file, motion.transform(frames, left_hand, right_hand))
-			# np.save(motion_data_dir_raw / output_file, np.diff(frames, axis=0))
+			np.save(motion_data_dir / output_file, motion.transform(frames, left_hand, right_hand))
+			np.save(motion_data_dir_raw / output_file, np.diff(frames, axis=0))
 
 	# for _, sentences, _, _ in file_generator(raw_data_folder):
 	# 	for _, frames in sentences:
@@ -145,12 +147,52 @@ def preprocess():
 	# preprocess_checkpoint = pose.get_preprocessor_state()
 	# np.save(preprocess_checkpoint, pose_data_dir / "preprocessor_params")
 
+	participant_avg = defaultdict(list)
+	surface_avg = defaultdict(list)
 
+	for participant, surface in typo_ratios.items():
+		for vals in surface.values():
+			surface_avg[surface].append(vals)
+			participant_avg[surface].append(vals)
+	
 	message = "Surface error averages -- "
-	for k, v in typo_ratios.items():
+	for k, v in surface_avg:
+		message += f"{k}: {sum(v) / len(v):.2%} "
+	print(message)
+
+	message = "Participant error averages -- "
+	for k, v in participant_avg:
 		message += f"{k}: {sum(v) / len(v):.2%} "
 	print(message)
 
 
 if __name__ == "__main__":
 	preprocess()
+# 'session_2474e5e5': 'cushion': [0.0666],	'legs': [0.0],		'pipe': [0.1428],	'table': [0.0714] = 0.2808
+# 'session_32d94b77': 'cushion': [0.1470],	'legs': [0.2121],	'pipe': [0.1129],	'table': [0.125] = 0.5970
+# 'session_4931439e': 'cushion': [0.0408],	'legs': [0.0222],	'pipe': [0.1764],	'table': [0.0769] = 0.3163
+# 'session_582f5770': 'cushion': [0.0],		'legs': [0.0909],	'pipe': [0.0],		'table': [0.0652] = 0.1561
+# 'session_62a08473': 'cushion': [0.0952],	'legs': [0.0270],	'pipe': [0.3428],	'table': [0.0] = 0.4650
+# 'session_70617e90': 'cushion': [0.1616],	'legs': [0.2048],	'pipe': [0.17],		'table': [0.1931] = 0.7295	bad
+# 'session_75a19362': 'cushion': [0.0666],	'legs': [0.0178],	'pipe': [0.2203],	'table': [0.06] = 0.3647
+# 'session_79fedad0': 'cushion': [0.2261],	'legs': [0.1875],	'pipe': [0.4081],	'table': [0.1475] = 0.9692	bad
+# 'session_85ad194a': 'cushion': [0.3720],	'legs': [1.3333],	'pipe': [0.26],		'table': [0.2549] = 2.2202	bad
+# 'session_874f6161': 'cushion': [0.1363],	'legs': [0.1176],	'pipe': [0.1052],	'table': [0.0806] = 0.4397
+# 'session_a2598998': 'cushion': [0.7647],	'legs': [0.0740],	'pipe': [0.1333],	'table': [1.0344] = 2.0064	bad
+# 'session_bdd5e9a9': 'cushion': [0.1176],	'legs': [0.0483],	'pipe': [0.0],		'table': [0.0612] = 0.2271
+# 'session_c562cfdc': 'cushion': [0.0],		'legs': [0.0937		'pipe': [0.0222],	'table': [0.0] = 0.1159
+# 'session_f81263ce': 'cushion': [0.125],		'legs': [0.05],		'pipe': [0.6],		'table': [0.2777] = 1.0527	bad
+# 'session_fce7566b': 'cushion': [0.1707],	'legs': [0.0526],	'pipe': [0.5],		'table': [0.1489] = 0.8722	bad
+
+
+# cushion	.1660
+# 0.0666 + 0.1470 + 0.0408 + 0.0 + 0.0952 + 0.1616 + 0.0666 + 0.2261 + 0.3720 + 0.1363 + 0.7647 + 0.1176 + 0.0 + 0.125 + 0.1707
+
+# legs	.1688
+# 0.0 + 0.2121 + 0.0222 + 0.0909 + 0.0270 + 0.2048 + 0.0178 + 0.1875 + 1.3333 + 0.1176 + 0.0740 + 0.0483 + 0.0937 + 0.05 + 0.0526
+
+# pipe	.2129
+# 0.1428 + 0.1129 + 0.1764 + 0.0 + 0.3428 + 0.17 + 0.2203 + 0.4081 + 0.26 + 0.1052 + 0.1333 + 0.0 + 0.0222 + 0.6 + 0.5
+
+# table	.1731
+# 0.0714 + 0.125 + 0.0769 + 0.0652 + 0.0 + 0.1931 + 0.06 + 0.1475 + 0.2549 + 0.0806 + 1.0344 + 0.0612 + 0.0 + 0.2777 + 0.1489

@@ -100,7 +100,7 @@ def _only_squeeze(frame_sequences):
 	for idx, sequence in enumerate(frame_sequences):
 
 		spread = _finger_spread(sequence)
-		if spread.size < 270:	# At least 1.5 seconds
+		if spread.size < 270 and spread.size < 2700:	# At least 1.5 seconds and less than 15 seconds
 			continue
 
 		# It doesn't matter if they wave their hands around, because this only considers the finger
@@ -108,7 +108,10 @@ def _only_squeeze(frame_sequences):
 		squeeze_distances[idx] = np.max(spread) - np.min(spread)
 		successful += 1
 
-	return sum(squeeze_distances) / successful
+	if successful != 0:
+		return sum([x for x in squeeze_distances if x is not None]) / successful
+	else:
+		raise ValueError("No clear squeezes")
 
 
 def _fit_floor(frames: np.ndarray, reference_hand_position: np.ndarray):

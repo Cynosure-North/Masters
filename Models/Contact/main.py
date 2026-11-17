@@ -89,10 +89,7 @@ import BERT
 import BiGRU
 import SANCD
 
-def interactive():
-	pass
-	# TODO: Interactive mode for contact
-	# NOTE: BiGRU isn't great for streaming a productionised version would need to solve that
+
 
 def train():
 	"""Train the component models before fine-tuning the complete SANCD model."""

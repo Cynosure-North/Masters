@@ -1,15 +1,12 @@
 torch
 numpy
-sounddevice
+scikit-learn
 editdistance
 natnet
-tokenizers
-transformers
-keyboard
+sounddevice
 
 # Extras, only needed for processing data into a form that can the models train on
 trafilatura
 warcio
 requests
 torchaudio
-hashlib
