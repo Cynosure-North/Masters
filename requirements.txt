@@ -10,3 +10,6 @@ trafilatura
 warcio
 requests
 torchaudio
+
+# Depending on OS
+triton-windowse

@@ -1,8 +1,11 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+# import torch._dynamo
+# torch._dynamo.config.suppress_errors = True
+
 from pathlib import Path
-from data import chars, pad_variable, TestGeometricDataset
+from data import chars, pad_variable, TestGeometricDataset, GeometricDataset
 
 SEED = 0
 VARIANT = "3d-simple"
@@ -124,16 +127,14 @@ def train_model(
 	device=None,
 	gradient_clip=None,
 	use_amp=True,
-	compile_model=hasattr(torch, "compile"),
+	compile_model=True,
 	seed=SEED,
 	use_augmentation=True,
 ):
 	"""Train, optionally early-stop on validation loss, and return the model."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
-	compiled_model = None
-	if compile_model and hasattr(torch, "compile"):
-		compiled_model = model
+	if compile_model:
 		model = torch.compile(model, dynamic=True)
 
 	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
@@ -155,21 +156,11 @@ def train_model(
 				data = augment_coordinates(data, generator)
 			labels = labels.flatten().to(device, non_blocking=True)
 			model.optimizer.zero_grad(set_to_none=True)
-			try:
-				with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
-					output = model(data)
-					loss = _loss_for_logits(output, labels, loss_fn)
-				if not torch.isfinite(loss):
-					raise RuntimeError(f"Non-finite loss at epoch {epoch}: {loss.item()}")
-			except torch._inductor.exc.TritonMissing:
-				if compiled_model is None:
-					raise
-				print("torch.compile is unavailable; continuing with eager execution")
-				model = compiled_model
-				compiled_model = None
-				with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
-					output = model(data)
-					loss = _loss_for_logits(output, labels, loss_fn)
+			with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
+				output = model(data)
+				loss = _loss_for_logits(output, labels, loss_fn)
+			if not torch.isfinite(loss):
+				raise RuntimeError(f"Non-finite loss at epoch {epoch}: {loss.item()}")
 
 			model.scaler.scale(loss).backward()
 			if gradient_clip is not None:
@@ -220,15 +211,13 @@ def test_model(
 	model,
 	dataloader,
 	use_amp=True,
-	compile_model=hasattr(torch, "compile"),
+	compile_model=True,
 ):
 	"""Evaluate and return average loss and masked-token accuracy."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 
-	compiled_model = None
-	if compile_model and hasattr(torch, "compile"):
-		compiled_model = model
+	if compile_model:
 		model = torch.compile(model, dynamic=True)
 
 	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
@@ -244,19 +233,9 @@ def test_model(
 	for labels, data in dataloader:
 		data = data.to(device, non_blocking=True)
 		labels = labels.flatten().to(device, non_blocking=True)
-		try:
-			with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
-				output = model(data)
-				loss = _loss_for_logits(output, labels, loss_fn)
-		except torch._inductor.exc.TritonMissing:
-			if compiled_model is None:
-				raise
-			print("torch.compile is unavailable; continuing with eager execution")
-			model = compiled_model
-			compiled_model = None
-			with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
-				output = model(data)
-				loss = _loss_for_logits(output, labels, loss_fn)
+		with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
+			output = model(data)
+			loss = _loss_for_logits(output, labels, loss_fn)
 
 		total_loss += loss.item()
 		batch_count += 1
@@ -294,9 +273,9 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 			# Input is [uv, normal, tangent vectors, principal curvatures, compressibility] instead of [x, y]
 			model = instantiate_model(save_path, input_size=16, num_layers=3)
 
-		train_dataloader = DataLoader(TestGeometricDataset(train_path), shuffle=True, **loader_kwargs)
-		validation_dataloader = DataLoader(TestGeometricDataset(validation_path), shuffle=False, **loader_kwargs)
-		test_dataloader = DataLoader(TestGeometricDataset(test_path), shuffle=False, **loader_kwargs)
+		train_dataloader = DataLoader(GeometricDataset(train_path), shuffle=True, **loader_kwargs)
+		validation_dataloader = DataLoader(GeometricDataset(validation_path), shuffle=False, **loader_kwargs)
+		test_dataloader = DataLoader(GeometricDataset(test_path), shuffle=False, **loader_kwargs)
 
 	print("data loaded")
 

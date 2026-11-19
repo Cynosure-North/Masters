@@ -4,6 +4,7 @@
 *.json
 *.uint8
 *.npy
+*.gguf
 
 *.pyc
 __pycache__

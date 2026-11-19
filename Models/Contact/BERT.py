@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import BatchSampler, DataLoader
+# import torch._dynamo
+# torch._dynamo.config.suppress_errors = True
+
 from functools import partial
 from pathlib import Path
 
@@ -263,14 +266,6 @@ class LengthBucketBatchSampler(BatchSampler):
 def _mlm_loss(logits, labels, loss_fn):
 	return loss_fn(logits.reshape(-1, logits.size(-1)), labels.reshape(-1))
 
-def _is_triton_missing(error):
-	"""Return whether an error is the optional Triton compiler failure."""
-	error_type = type(error)
-	return (
-		error_type.__name__ == "TritonMissing"
-		and error_type.__module__ == "torch._inductor.exc"
-	)
-
 def train_model(
 	model,
 	dataloader,
@@ -283,7 +278,7 @@ def train_model(
 	scheduler=None,
 	loss_fn=None,
 	use_amp=True,
-	compile_model=hasattr(torch, "compile"),
+	compile_model=True,
 	checkpoint_interval=50_000,
 	seed=SEED,
 ):
@@ -291,7 +286,7 @@ def train_model(
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
 	compiled_model = None
-	if compile_model and hasattr(torch, "compile"):
+	if compile_model:
 		compiled_model = model
 		model = torch.compile(model, dynamic=True)
 	loss_fn = loss_fn or nn.CrossEntropyLoss(ignore_index=-100)
@@ -316,19 +311,9 @@ def train_model(
 			)
 
 			model.optimizer.zero_grad(set_to_none=True)
-			try:
-				with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
-					logits = model(masked_input_ids, padding_mask=padding_mask)
-					loss = _mlm_loss(logits, labels, loss_fn)
-			except RuntimeError as e:
-				if compiled_model is None or not _is_triton_missing(e):
-					raise
-				print("torch.compile is unavailable; continuing with eager execution")
-				model = compiled_model
-				compiled_model = None
-				with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
-					logits = model(masked_input_ids, padding_mask=padding_mask)
-					loss = _mlm_loss(logits, labels, loss_fn)
+			with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
+				logits = model(masked_input_ids, padding_mask=padding_mask)
+				loss = _mlm_loss(logits, labels, loss_fn)
 			model.scaler.scale(loss).backward()
 			if gradient_clip is not None:
 				model.scaler.unscale_(model.optimizer)
@@ -362,15 +347,13 @@ def test_model(
 	tokenizer,
 	mask_prob=0.15,
 	use_amp=True,
-	compile_model=hasattr(torch, "compile"),
+	compile_model=True,
 	seed=SEED,
 ):
 	"""Evaluate a character MLM and return average loss and masked-token accuracy."""
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	model.to(device)
-	compiled_model = None
-	if compile_model and hasattr(torch, "compile"):
-		compiled_model = model
+	if compile_model:
 		model = torch.compile(model, dynamic=True)
 	model.eval()
 	loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
@@ -391,17 +374,8 @@ def test_model(
 			tokenizer,
 			mask_generator,
 			mask_prob)
-		try:
-			with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
-				logits = model(masked_input_ids, padding_mask=padding_mask)
-		except RuntimeError as error:
-			if compiled_model is None or not _is_triton_missing(error):
-				raise
-			print("torch.compile is unavailable; continuing with eager evaluation")
-			model = compiled_model
-			compiled_model = None
-			with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
-				logits = model(masked_input_ids, padding_mask=padding_mask)
+		with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
+			logits = model(masked_input_ids, padding_mask=padding_mask)
 		total_loss += _mlm_loss(logits, labels, loss_fn).item()
 		valid_labels = labels.ne(-100)
 		predictions = logits.argmax(dim=-1)

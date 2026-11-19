@@ -8,13 +8,16 @@ import re
 import numpy as np
 from pathlib import Path
 from torch.utils.data import DataLoader
+import enchant
 
 from data import chars, TestMotionDataset
 import TCN
 
 
+
 alphabet = chars + ['-']	# CTC blank (last column)
 char_to_index = {character: index for index, character in enumerate(alphabet)}
+UK = enchant.Dict("en_UK")
 
 
 class BeamSearcher:
@@ -33,8 +36,8 @@ class BeamSearcher:
 		ctc,
 		*,
 		beam_width=100,
-		alpha=0.30,
-		beta=12,
+		alpha=0.50,
+		beta=10,
 		prune=0.001,
 		convergence_delay=6
 	):
@@ -71,8 +74,9 @@ class BeamSearcher:
 		))
 		lm_log_probabilities = dict(zip(
 			lm_candidates,
-			self.llm.get_word_log_probabilities(lm_candidates),
+			self.llm.get_word_probabilities(lm_candidates),
 		))
+		# print(lm_log_probabilities)	# TODO: Why are so many empty dicts being printed?
 
 		for prefix in self.previous_prefixes[-1]:
 			for c in pruned_alphabet:
@@ -84,16 +88,23 @@ class BeamSearcher:
 					Pb[prefix] += blank_prob * (self.prev_Pb[prefix] + self.prev_Pnb[prefix])
 				
 				else:
+					if (not prefix and c == " ") or (prefix and extended[-1] == prefix[-1] == " "):
+						Pnb[prefix] += self.prev_Pnb[prefix]
+						Pb[prefix] += self.prev_Pb[prefix]
+						continue
+
 					# Extending with the self.previous character
-					if len(prefix) > 0 and c == prefix[-1]:
+					elif prefix and c == prefix[-1]:
 						Pnb[extended] += char_prob * self.prev_Pb[prefix]
 						Pnb[prefix] += char_prob * self.prev_Pnb[prefix]
 
 					# Extending with space/end character - triggers LM likelihood check
 					elif len(prefix.replace(' ', '')) > 0 and c == ' ':
 						# With a convergence_delay of only a handful of frames I'm unsure how much this can really do
-						lm_prob = np.exp(alpha * lm_log_probabilities[extended.strip()])
-						Pnb[extended] += lm_prob * char_prob * (self.prev_Pb[prefix] + self.prev_Pnb[prefix])
+						lm_prob = lm_log_probabilities[extended.strip()]
+						lm_factor = lm_prob ** alpha if lm_prob != 0 else 0.001
+						# print(f"extended: '{extended}' - {lm_prob} - {lm_factor}")
+						Pnb[extended] += lm_factor * char_prob * (self.prev_Pb[prefix] + self.prev_Pnb[prefix])
 					# Extending with any other character
 					else:
 						Pnb[extended] += char_prob * (self.prev_Pb[prefix] + self.prev_Pnb[prefix])
@@ -102,7 +113,6 @@ class BeamSearcher:
 					if extended not in self.previous_prefixes[-1]:
 						Pb[extended] += blank_prob * (self.prev_Pb[extended] + self.prev_Pnb[extended])
 						Pnb[extended] += char_prob * self.prev_Pnb[extended]
-
 
 		def merge(dict1, dict2):
 			new_dict = {}
@@ -117,16 +127,20 @@ class BeamSearcher:
 			return new_dict
 
 		current_prefixes = merge(Pb, Pnb)
+
+		# if not all([UK.check(word) for word in [x.strip().rsplit(" ", 1)[1] for x in current_prefixes.keys() if " " in x.strip() and x[-1] == " "]]):
+		# 	print(current_prefixes)
 		
 		# Select most probable prefixes
 		word_count = lambda l: re.findall(r'\w+\s', l)
 		scorer = lambda l: current_prefixes[l] * (len(word_count(l)) + 1) ** beta
 		ranked_prefixes = sorted(current_prefixes, key=scorer, reverse=True)
-			
+
 		if convergence_delay == 0:
 			self.prev_Pb, self.prev_Pnb = Pb, Pnb
 			current_prefixes = ranked_prefixes[:min(beam_width, len(ranked_prefixes))]
 			self.previous_prefixes.append(current_prefixes)
+			# print(self.previous_prefixes[-1])			
 			return current_prefixes[0].strip()
 
 		# Force convergence
@@ -162,46 +176,6 @@ class BeamSearcher:
 
 		return self.previous_prefixes[0][0].strip()
 
-	def finalize(self, *, alpha=0.30, beta=12):
-		"""Finalize an utterance, including a word that has no CTC separator.
-
-		Interactive CTC input often stops immediately after the final character.
-		Score each retained hypothesis as if a word boundary followed it so the
-		last word receives the same language-model treatment as earlier words.
-		"""
-		if self.previous_prefixes is None or not self.previous_prefixes[-1]:
-			return ''
-
-		prefixes = self.previous_prefixes[-1]
-		acoustic_scores = {
-			prefix: self.prev_Pb[prefix] + self.prev_Pnb[prefix]
-			for prefix in prefixes
-		}
-		unfinished = [
-			prefix.rstrip()
-			for prefix in prefixes
-			if prefix and prefix.rstrip()
-		]
-		lm_log_scores = dict(zip(
-			unfinished,
-			self.llm.get_word_log_probabilities(unfinished),
-		))
-
-		def score(prefix):
-			acoustic_score = acoustic_scores[prefix]
-			if acoustic_score <= 0:
-				return float('-inf')
-			final_word = prefix.rstrip()
-			lm_log_score = lm_log_scores.get(final_word, 0.0)
-			word_count = len(re.findall(r'\w+\s', prefix))
-			return (
-				np.log(acoustic_score)
-				+ alpha * lm_log_score
-				+ beta * np.log(word_count + 1)
-			)
-
-		return max(prefixes, key=score).strip()
-
 	def reset(self):
 		self.previous_prefixes = None
 		self.prev_Pb, self.prev_Pnb = defaultdict(float), defaultdict(float)
@@ -213,14 +187,7 @@ def prefix_beam_search(ctc, beam_searcher, **kwargs):
 	final_output = ''
 	for frame in ctc:
 		final_output = beam_searcher.incremental_prefix_beam_search(
-			frame, convergence_delay=0, **kwargs
-		)
-
-	if len(ctc) > 0:
-		final_output = beam_searcher.finalize(
-			alpha=kwargs.get('alpha', 0.30),
-			beta=kwargs.get('beta', 12),
-		)
+			frame, convergence_delay=0, **kwargs)
 
 	beam_searcher.reset()
 	return final_output
@@ -337,8 +304,8 @@ def _load_sentence_named_ctc(test_dir):
 	if not test_dir.is_dir():
 		raise FileNotFoundError(f"CTC test directory not found: {test_dir}")
 
-	bundle = torchaudio.pipelines.WAV2VEC2_ASR_BASE_10M
-	model_labels = bundle.get_labels()
+	# This isn't great (maybe I'm doing something wrong), but it's good enough for testing
+	model_labels = torchaudio.pipelines.WAV2VEC2_ASR_BASE_10M.get_labels()
 	beam_alphabet = alphabet
 	beam_indices = {character: index for index, character in enumerate(beam_alphabet)}
 	ctc_files = sorted(test_dir.glob("*.npy"))
@@ -347,13 +314,12 @@ def _load_sentence_named_ctc(test_dir):
 
 	ctc_sequences = []
 	texts = []
-	for example_file in ctc_files[:10]:		# FIXME: I'm using a subset of the files to test BeamSearch because it runs slow, I'd like to speed it up and run a full test
+	for example_file in ctc_files[:30]:
 		model_ctc = np.load(example_file, allow_pickle=False)
 		if model_ctc.ndim != 2 or model_ctc.shape[1] != len(model_labels):
 			raise ValueError(
 				f"Expected a (time, {len(model_labels)}) CTC array in {example_file}; "
-				f"got shape {model_ctc.shape}"
-			)
+				f"got shape {model_ctc.shape}")
 
 		# Wav2vec uses blank-first uppercase labels; the local decoder uses
 		# lowercase labels and places blank last. Fold unsupported symbols into blank.
@@ -384,18 +350,12 @@ def test():
 	language_model = LLM.instantiate_model(llm_path)
 	beam_searcher = BeamSearcher(language_model)
 	for ctc, expected_text in zip(ctc_sequences, texts):
-		greedy_out = greedy_decoder(ctc)
-		pbs_out = prefix_beam_search(ctc, beam_searcher)
 		print()
+		print(f"My PBS:        {prefix_beam_search(ctc, beam_searcher, beam_width=100)}")
+		print(f"Greedy Decode: {greedy_decoder(ctc)}")
 		print(f"Reference:     {expected_text}")
-		print(f"Greedy Decode: {greedy_out}")
-		print(f"My PBS:        {pbs_out}")
 	
 
 if __name__ == "__main__":
-	test()
+	tune_alpha_beta()
 	
-# TODO: Test beamsearch
-# The final word is often wrong
-# There's one example which is fucked (#8)
-# I'd like if it was faster

@@ -20,9 +20,19 @@ class Phase2:
 		self.model = None
 		self.transform = None
 		self.text = ""
+		self.dropped_chars = []
 
 		global phaser
 		phaser = self
+
+	@property
+	def display_string(self):
+		if self.text:
+			if self.model_name is not None and "contact" in self.model_name:
+				return self.text
+			else:
+				return "".join([x for x,y in zip(self.text, self.dropped_chars) if not y])
+		return ""
 
 	def _handle_frame(self, frame):
 		res = self.model(frame)
@@ -30,7 +40,9 @@ class Phase2:
 		if self.model_name is not None and "contact" in self.model_name:
 			self.text += str(res)
 		else:
-			self.text = res(res)
+			if res != self.text:
+				self.text = res(res)
+				self.dropped_chars.append(False)
 
 	def _change_model(self, model_name):
 		if "motion" in model_name:
@@ -127,8 +139,10 @@ class Phase2:
 
 		def on_middle_pedal_button(_event: tk.Event) -> None:
 			if self.text:
-				self.text = self.text[:-1]
-			# TODO: IDK how to make this work with the motion model
+				if self.model_name is not None and "contact" in self.model_name:
+					self.text = self.text[:-1]
+				else:
+					self.dropped_chars[-1] = True
 
 		folder_names = ["table", "pipe", "cushion", "legs"]
 		random.shuffle(folder_names)

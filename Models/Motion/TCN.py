@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from pathlib import Path
 from data import TestMotionDataset, MotionDataset, chars
+import editdistance
 
 VARIANT = "3d-raw"
 CTC_BLANK = len(chars)
@@ -242,6 +243,8 @@ def test_model(model, dataloader):
 	total_loss = 0.0
 	correct_sequences = 0
 	total_sequences = 0
+	incorrect_chars = 0
+	total_chars = 0
 	batch_count = 0
 	for batch in dataloader:
 		features, targets, input_lengths, target_lengths = batch
@@ -267,10 +270,13 @@ def test_model(model, dataloader):
 				previous = token
 			expected = target.tolist()
 			correct_sequences += int(collapsed == expected)
+			total_chars += len(expected)
+			incorrect_chars += editdistance.eval(collapsed, expected)
 		batch_count += 1
 
+	char_accuracy = 1 - (incorrect_chars / total_chars)
 	accuracy = correct_sequences / max(total_sequences, 1)
-	return total_loss / max(batch_count, 1), accuracy
+	return total_loss / max(batch_count, 1), accuracy, char_accuracy
 
 
 def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=None, variant=VARIANT):
@@ -322,9 +328,10 @@ def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=No
 	save_checkpoint(trained_model, save_path,
 		cleanup_previous=save_path.stem.replace("final_", ""))
 
-	loss, accuracy = test_model(trained_model, test_dataloader)
+	loss, accuracy, char_accuracy = test_model(trained_model, test_dataloader)
 	print(f"Test Loss: {loss:.4f}")
 	print(f"Test Accuracy: {accuracy:.4%}")
+	print(f"Test Character Accuracy: {char_accuracy:.4%}")
 
 
 if __name__ == "__main__":

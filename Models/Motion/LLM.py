@@ -3,11 +3,16 @@
 import math
 from collections import OrderedDict
 from pathlib import Path
+import numpy as np
+import enchant
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
+# import torch._dynamo
+# torch._dynamo.config.suppress_errors = True
+import torch._inductor.config
+torch._inductor.config.triton.enable_fp_fusion = True
 
 from data import CCNewsDataset, chars
 
@@ -36,8 +41,15 @@ class CharacterLanguageModel(nn.Module):
 		)
 
 		self.output = nn.Linear(hidden_size, self.vocab_size)
-		self.device = torch.device("cpu")
+		self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 		self.inference_dtype = torch.float32
+
+		self.UK = enchant.Dict("en_UK")
+		self.US = enchant.Dict("en_US")
+		for word in ["h", "e", "t", "o", "u", "n"]:
+			self.US.remove(word)
+			self.UK.remove(word)
+
 		self._score_cache = OrderedDict()
 		self._cache_size = 4096
 
@@ -50,25 +62,21 @@ class CharacterLanguageModel(nn.Module):
 	@staticmethod
 	def filter_text(text):
 		return " ".join(
-			"".join(character if character in chars else "" for character in str(text).lower()).split()
-		)
+			"".join(character if character in chars else "" for character in str(text).lower()).split())
 
 	def to(self, *args, **kwargs):
 		result = super().to(*args, **kwargs)
 		parameters = list(self.parameters())
 		if parameters:
 			self.device = parameters[0].device
-		self.inference_dtype = (
-			torch.float16 if self.device.type == "cuda" else torch.float32
-		)
+		self.inference_dtype = (torch.float16 if self.device.type == "cuda" else torch.float32)
 		return result
 
 	def _autocast(self):
 		return torch.autocast(
 			device_type=self.device.type,
 			dtype=self.inference_dtype,
-			enabled=self.device.type == "cuda",
-		)
+			enabled=self.device.type == "cuda" )
 
 	def forward(self, token_ids, hidden=None):
 		embedded = self.embedding(token_ids)
@@ -78,47 +86,51 @@ class CharacterLanguageModel(nn.Module):
 	def _ids(self, text):
 		return [self._character_ids[character] for character in text]
 
-	def get_word_log_probabilities(self, texts, *, batch_size=16, use_cache=True):
+	def get_word_probabilities(self, texts, *, use_cache=True):
 		if isinstance(texts, str):
 			texts = [texts]
 		results = []
 		for original_text in texts:
+
 			text = self.filter_text(original_text)
+			if not text:
+				results.append(0.0)
+				continue
+
+			prefix, word = text.rsplit(" ", 1) if " " in text else ("", text)
+			if not (self.UK.check(word) or self.US.check(word)):
+				# print(f"Invalid word: '{word}'")
+				results.append(0.0)
+				continue
+
 			if use_cache and text in self._score_cache:
 				score = self._score_cache.pop(text)
 				self._score_cache[text] = score
 				results.append(score)
 				continue
-			if not text:
-				results.append(0.0)
-				continue
-			prefix, word = text.rsplit(" ", 1) if " " in text else ("", text)
+
 			context = [self.bos_id, *self._ids((prefix + " ") if prefix else "")]
 			targets = self._ids(word + " ")
 			input_ids = torch.tensor([context], dtype=torch.long, device=self.device)
+
 			with torch.inference_mode(), self._autocast():
 				logits, hidden = self.forward(input_ids)
 				log_probability = 0.0
 				next_logits = logits[0, -1]
 				for target in targets:
-					log_probability += F.log_softmax(next_logits.float(), dim=-1)[target].item()
+					log_probability += math.exp(F.softmax(next_logits.float(), dim=-1)[target].item())
 					token = torch.tensor([[target]], dtype=torch.long, device=self.device)
 					next_logits, hidden = self.forward(token, hidden)
 					next_logits = next_logits[0, -1]
-			score = log_probability / len(targets)
+
+			odds = log_probability / len(targets)
+			score = odds / (1 + odds)
 			self._score_cache[text] = score
 			results.append(score)
+
 		while len(self._score_cache) > self._cache_size:
 			self._score_cache.popitem(last=False)
 		return results
-
-	def get_word_probabilities(self, texts, *, batch_size=16):
-		return [math.exp(score) for score in self.get_word_log_probabilities(
-			texts, batch_size=batch_size
-		)]
-
-	def get_word_probability(self, text):
-		return self.get_word_probabilities([text])[0]
 
 def save_checkpoint(model, destination, cleanup_previous=None):
 	destination = Path(destination)
@@ -167,13 +179,13 @@ def instantiate_model(model_path, **kwargs):
 	return model
 
 
-def test_model(model, corpus, *, block_size=256):
-	"""Return average next-character loss and perplexity for an encoded corpus."""
+def test_model(model, corpus, *, batch_size=32, block_size=256):
 	model.eval()
 	total_loss = 0.0
 	total_tokens = 0
 	with torch.inference_mode(), model._autocast():
-		for inputs, targets in corpus.batches(block_size, model.device):
+		for _ in range(1000):
+			inputs, targets = corpus.sample_batch(batch_size, block_size, model.device)
 			logits, _ = model(inputs)
 			total_loss += F.cross_entropy(
 				logits.reshape(-1, model.vocab_size),
@@ -196,8 +208,8 @@ def train_model(
 	steps=None,
 	batch_size=32,
 	block_size=256,
-	validation_interval=5000,
-	compile_model=hasattr(torch, "compile"),
+	validation_interval=20_000,
+	compile_model=True,
 ):
 	"""Train the character LM and restore its best validation checkpoint."""
 	if validation_interval < 1:
@@ -209,7 +221,7 @@ def train_model(
 	best_checkpoint = None
 	step = 0
 	network = model
-	if compile_model and hasattr(torch, "compile"):
+	if compile_model:
 		network = torch.compile(model)
 	use_amp = model.device.type == "cuda"
 	scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
@@ -230,18 +242,20 @@ def train_model(
 			scaler.step(model.optimizer)
 			scaler.update()
 
-			if step % validation_interval == 0:
-				validation_loss, _ = test_model(
-					model, validation_corpus, block_size=block_size
-				)
-				if validation_loss < best_loss:
-					checkpoint = checkpoint_path.with_stem(f"{checkpoint_path.stem}_{step // validation_interval}")
+			if step % 1000 == 0:
+				message = f"step {step:>8} -- train loss {loss.item():9.6f}"
 
-					best_loss = validation_loss
-					best_checkpoint = checkpoint
-					save_checkpoint(model, best_checkpoint)
+				if step % validation_interval == 0:
+					validation_loss, _ = test_model(model, validation_corpus, block_size=block_size)
+					message += f" -- val loss {validation_loss:.4f}"
+					if validation_loss < best_loss:
+						checkpoint = checkpoint_path.with_stem(f"{checkpoint_path.stem}_{step // validation_interval}")
 
-				print(f"step {step:>6} -- train loss {loss.item():.4f} -- val loss {validation_loss:.4f}")
+						best_loss = validation_loss
+						best_checkpoint = checkpoint
+						save_checkpoint(model, best_checkpoint)
+
+				print(message)
 
 		print("Training complete")
 	except KeyboardInterrupt:
@@ -286,14 +300,13 @@ def main(steps=None, *, batch_size=128):
 		validation_corpus,
 		checkpoint_path=save_path.with_stem(save_path.stem.replace("final_", "")),
 		steps=steps,
-		batch_size=batch_size,
-		compile_model=hasattr(torch, "compile"))
+		batch_size=batch_size)
 	save_checkpoint(model, save_path,
 		cleanup_previous=save_path.stem.replace("final_", ""))
 
-	# loss, perplexity = test_model(trained_model, test_corpus)
-	# print(f"Test Loss: {loss:.4f}")
-	# print(f"Test Perplexity: {perplexity:.4f}")
+	loss, perplexity = test_model(trained_model, test_corpus)
+	print(f"Test Loss: {loss:.4f}")
+	print(f"Test Perplexity: {perplexity:.4f}")
 	return trained_model
 
 

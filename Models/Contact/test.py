@@ -118,7 +118,3 @@ def main():
 
 if __name__ == "__main__":
 	main()
-
-# NOTE: In testing SACND is of no help compared to BiGRU (98.44% vs 98.47% accuracy),
-# I'll need to test more, but this is designed for two-finger typing on a mobile screen so it
-# shouldn't be too surprising it's more accurate here. It'll probably help more with messier data

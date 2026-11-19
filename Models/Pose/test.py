@@ -177,6 +177,3 @@ def main():
 
 if __name__ == "__main__":
 	main()
-
-# NOTE: The test accuracy for the pose MLP is way lower than was reported in the paper,
-# I wonder if it's because of the dataset I'm using, or if I've implemented it wrong
