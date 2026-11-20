@@ -279,13 +279,13 @@ def test_model(model, dataloader):
 	return total_loss / max(batch_count, 1), accuracy, char_accuracy
 
 
-def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=None, variant=VARIANT, epochs=-1):
+def main(train_path_=None, validation_path_=None, test_path_=None, save_path_=None, variant=VARIANT, epochs=-1):
 	project_dir = Path(__file__).resolve().parent
-	save_path = _save_path or project_dir / "trained" / "final_TCN.pth"
+	save_path = save_path_ or project_dir / "trained" / "final_TCN.pth"
 	data_dir = project_dir / "data" / variant
-	train_path = _train_path or data_dir / "train"
-	validation_path = _validation_path or data_dir / "validation"
-	test_path = _test_path or data_dir / "test"
+	train_path = train_path_ or data_dir / "train"
+	validation_path = validation_path_ or data_dir / "validation"
+	test_path = test_path_ or data_dir / "test"
 
 	loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
 	if not variant:

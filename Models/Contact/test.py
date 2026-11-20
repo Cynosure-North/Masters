@@ -90,12 +90,12 @@ def main():
 
 	if False or not (bigru_path.exists() and sacnd_path.exists()):
 		print("######### Training and testing BiGRU")
-		BiGRU.main(train_path, val_path, test_path, _save_path=bigru_path)
+		BiGRU.main(train_path, val_path, test_path, save_path_=bigru_path)
 
 		# BERT trains on separate data (even in the final implementation), and can be tested on its own
 			
 		print("######### Training and testing SANCD")
-		SANCD.main(train_path, val_path, test_path, _bigru_path=bigru_path, _save_path=sacnd_path)
+		SANCD.main(train_path, val_path, test_path, bigru_path_=bigru_path, save_path_=sacnd_path)
 	else:
 		loader_kwargs = {
 			"batch_size": 64,
