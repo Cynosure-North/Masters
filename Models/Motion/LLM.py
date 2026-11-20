@@ -3,16 +3,15 @@
 import math
 from collections import OrderedDict
 from pathlib import Path
-import numpy as np
 import enchant
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import os
+os.environ["TRITON_DEFAULT_FP_FUSION"] = "1"
 # import torch._dynamo
 # torch._dynamo.config.suppress_errors = True
-import torch._inductor.config
-torch._inductor.config.triton.enable_fp_fusion = True
 
 from data import CCNewsDataset, chars
 
@@ -249,6 +248,7 @@ def train_model(
 					validation_loss, _ = test_model(model, validation_corpus, block_size=block_size)
 					message += f" -- val loss {validation_loss:.4f}"
 					if validation_loss < best_loss:
+						message += " new best"
 						checkpoint = checkpoint_path.with_stem(f"{checkpoint_path.stem}_{step // validation_interval}")
 
 						best_loss = validation_loss
@@ -307,7 +307,6 @@ def main(steps=None, *, batch_size=128):
 	loss, perplexity = test_model(trained_model, test_corpus)
 	print(f"Test Loss: {loss:.4f}")
 	print(f"Test Perplexity: {perplexity:.4f}")
-	return trained_model
 
 
 if __name__ == "__main__":

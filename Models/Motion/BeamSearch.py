@@ -10,7 +10,7 @@ from pathlib import Path
 from torch.utils.data import DataLoader
 import enchant
 
-from data import chars, TestMotionDataset
+from data import chars, MotionDataset
 import TCN
 
 
@@ -76,7 +76,6 @@ class BeamSearcher:
 			lm_candidates,
 			self.llm.get_word_probabilities(lm_candidates),
 		))
-		# print(lm_log_probabilities)	# TODO: Why are so many empty dicts being printed?
 
 		for prefix in self.previous_prefixes[-1]:
 			for c in pruned_alphabet:
@@ -183,7 +182,7 @@ class BeamSearcher:
 		self.prev_Pnb[''] = 0
 
 def prefix_beam_search(ctc, beam_searcher, **kwargs):
-	"""Decode a complete CTC sequence and finalize its last word."""
+	"""Decode a complete CTC sequence """
 	final_output = ''
 	for frame in ctc:
 		final_output = beam_searcher.incremental_prefix_beam_search(
@@ -194,76 +193,73 @@ def prefix_beam_search(ctc, beam_searcher, **kwargs):
 	
 def tune_alpha_beta(
 	ctc_sequences,
-	texts,
+	labels,
 	language_model,
 	*,
-	alpha_values=(0, 0.001, 0.005, 0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 0.9),
-	beta_values=(0, 0.5, 1, 1.5, 3, 5, 8, 12),
+	# alpha_values=(0, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9),
+	# beta_values=(0, 1, 3, 5, 7, 9, 11, 13),
+	alpha_values=(0.1, 0.2),
+	beta_values=(5, 9),
 ):
-	"""Grid-search decoder weights on arrays or sentence-named .npy exports.
-
-	Pass a directory path as ``ctc_sequences`` to load the ``*.npy`` files and
-	derive reference strings from their filenames. Otherwise, provide CTC arrays
-	and matching ``texts`` as before.
-	"""
-	ctc_sequences, texts = ctc_sequences[:10], texts[:10]
+	""" Grid-search decoder weights on arrays or sentence-named .npy exports """
 
 	if ctc_sequences is None:
 		raise ValueError("CTC sequences are required")
-	if texts is None:
+	if labels is None:
 		raise ValueError("texts are required")
-	if not texts:
+	if not labels:
 		raise ValueError("At least one CTC sequence is required for tuning")
 	# if len(ctc_sequences) != len(texts):
 	# 	raise ValueError("ctc_sequences and texts must have the same length.")
 
 
 	beam_searcher = BeamSearcher(language_model)
-	best_result = (0, -1, -1)
+	best_result = (99999, -1, -1)
 
 	for alpha in alpha_values:
 		for beta in beta_values:
-			score = 1 - (sum(
+			score = sum(
 				editdistance.eval(
-					prefix_beam_search(ctc, beam_searcher, alpha=alpha, beta=beta, alphabet=alphabet),
+					prefix_beam_search(ctc, beam_searcher, alpha=alpha, beta=beta),
 					expected)
-				for ctc, expected in zip(ctc_sequences, texts)
-			) / sum (len(text) for text in texts))
+				for ctc, expected in zip(ctc_sequences, labels))
 
-			print(f"alpha: {alpha:<5g}, beta: {beta:<3g} - matching characters: {score:.2%}")
+			print(f"alpha: {alpha:<4g} beta: {beta:<2g} - edit distance: {score}")
 
-			if score > best_result[0]:
+			if score < best_result[0]:
+				print(f"new best - {score}")
 				best_result = (score, alpha, beta)
 
 	return (best_result[1], best_result[2], best_result[0])
 
 
 def run_tuning():
+	import LLM
 	project_dir = Path(__file__).resolve().parent
-	llm_path = project_dir / "trained" / "final_LLM.pth"
-	test_dir = project_dir / "data" / "beamsearch_test"
 
-	if True:
+	if False:
 		print("Using pregenerated CTC output")
-		ctc_outputs, ctc_labels = _load_sentence_named_ctc(test_dir)
+		data_path = project_dir / "data" / "beamsearch_test"
+		ctc_outputs, ctc_labels = _load_sentence_named_ctc(data_path)
 	else:
-		from test import dir_path, random_split  # Import here to avoid circular imports
-		train_path, _, _ = random_split(dir_path)
-
 		print("Using TCN output")
-		tcn_path = project_dir / "trained" / "final_TCN.pth"
+
+		llm_path = project_dir / "trained" / "final_LLM.pth"
+		tcn_path = project_dir / "trained" / "final_TCN_3d-raw.pth"
+		data_path = project_dir / "data" / "3d-raw" / "train"
 
 		tcn = TCN.instantiate_model(tcn_path).eval()
 		device = next(tcn.parameters()).device
 		loader_kwargs = {"batch_size": 64, "num_workers": 2, "pin_memory": True}
 		loader = DataLoader(
-			TestMotionDataset(train_path),
+			MotionDataset(data_path),
 			collate_fn=TCN.collate_batch,
 			**loader_kwargs)
 
 		ctc_outputs = []
 		ctc_labels = []
-		for features, labels, _, _ in loader:
+		for batch in loader:
+			features, labels, _, _ = batch
 			logits = tcn(features.to(device, non_blocking=True))
 
 			for sample_logits, label in zip(logits, labels):
@@ -272,11 +268,17 @@ def run_tuning():
 				ctc_outputs.append(sample_logits)
 				ctc_labels.append(label)
 
-		print("Loaded data, running sweep")
+			if len(ctc_labels) > 100:
+				break
 
-	import LLM
+		print("Data loaded, running sweep")
+
 	language_model = LLM.instantiate_model(llm_path)
+
 	alpha, beta, score = tune_alpha_beta(ctc_outputs, ctc_labels, language_model)
+
+	with open(llm_path.with_name("beamsearch_tuning_params.txt"), 'w') as file:
+		file.write(f"alpha: {alpha}, beta: {beta}, edit distance: {score}")
 
 	print(f"Best alpha: {alpha}")
 	print(f"Best beta: {beta}")
@@ -357,5 +359,5 @@ def test():
 	
 
 if __name__ == "__main__":
-	tune_alpha_beta()
+	run_tuning()
 	

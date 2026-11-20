@@ -98,9 +98,9 @@ def main():
 	errors = []
 
 	print("######### Training TCN (3d-raw)")
-	TCN.main(variant="3d-raw")
+	TCN.main(variant="3d-raw", epochs=15_000)
 	print("######### Training TCN (3d)")
-	TCN.main(variant="3d")
+	TCN.main(variant="3d", epochs=10_000)
 
 	print("######### Tuning Beam Search")
 	BeamSearch.run_tuning()

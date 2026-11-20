@@ -5,6 +5,7 @@
 *.uint8
 *.npy
 *.gguf
+*.txt
 
 *.pyc
 __pycache__
