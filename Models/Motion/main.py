@@ -81,12 +81,12 @@ class prepend_print(ContextDecorator):
 		print(f"######### Training {self.prefix}")
 		
 		def custom_print(*args, **kwargs):
-			self.original_print(self.prefix, *args, **kwargs)
+			self.original_print(self.prefix + ": ", *args, **kwargs)
 			
 		builtins.print = custom_print
 		return self
 
-	def __exit__(self, exc_type, exc_val, exc_tb):
+	def __exit__(self, _exc_type, _exc_val, _exc_tb):
 		builtins.print = self.original_print
 		return False
 
@@ -115,12 +115,10 @@ def init(new_model):
 	return _interactive
 
 def main():
-	errors = []
-
 	with prepend_print("TCN (3d-raw)"):
 		TCN.main(variant="3d-raw", epochs=10_000)
 	with prepend_print("TCN (3d)"):
-		TCN.main(variant="3d", epochs=5_000)
+		TCN.main(variant="3d", epochs=10_000)
 
 	with prepend_print("BeamSearch"):
 		BeamSearch.run_tuning()

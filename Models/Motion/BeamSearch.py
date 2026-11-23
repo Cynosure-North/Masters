@@ -223,8 +223,9 @@ def tune_alpha_beta(
 					prefix_beam_search(ctc, beam_searcher, alpha=alpha, beta=beta),
 					expected)
 				for ctc, expected in zip(ctc_sequences, labels))
+			total_chars = sum([len(l) for l in labels])
 
-			print(f"alpha: {alpha:<4g} beta: {beta:<2g} - edit distance: {score}")
+			print(f"alpha: {alpha:<4g} beta: {beta:<2g} - edit distance: {score}/{total_chars}")
 
 			if score < best_result[0]:
 				print(f"new best - {score}")
@@ -344,7 +345,7 @@ def _load_sentence_named_ctc(test_dir):
 
 
 def test():
-	llm_path = Path(__file__).resolve().parent / "trained" / "final_LLM.pth"
+	llm_path = Path(__file__).resolve().parent / "trained" / "best_LLM.pth"
 	test_dir = Path(__file__).resolve().parent / "data" / "beamsearch_test"
 	ctc_sequences, texts = _load_sentence_named_ctc(test_dir)
 
