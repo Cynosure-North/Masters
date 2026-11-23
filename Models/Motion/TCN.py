@@ -230,6 +230,8 @@ def train_model(
 		print("Training interrupted")
 
 	finally:
+		save_checkpoint(model, checkpoint_path.with_stem(f"{checkpoint_path.stem}_last"))
+
 		if best_checkpoint is not None:
 			model = instantiate_model(best_checkpoint)
 	return model
@@ -281,7 +283,7 @@ def test_model(model, dataloader):
 
 def main(train_path_=None, validation_path_=None, test_path_=None, save_path_=None, variant=VARIANT, epochs=-1):
 	project_dir = Path(__file__).resolve().parent
-	save_path = save_path_ or project_dir / "trained" / "final_TCN.pth"
+	save_path = save_path_ or project_dir / "trained" / "best_TCN.pth"
 	data_dir = project_dir / "data" / variant
 	train_path = train_path_ or data_dir / "train"
 	validation_path = validation_path_ or data_dir / "validation"

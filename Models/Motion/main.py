@@ -70,6 +70,26 @@ import LLM
 import TCN
 import BeamSearch
 
+import builtins
+from contextlib import ContextDecorator
+class prepend_print(ContextDecorator):
+	def __init__(self, prefix):
+		self.prefix = prefix
+
+	def __enter__(self):
+		self.original_print = builtins.print
+		print(f"######### Training {self.prefix}")
+		
+		def custom_print(*args, **kwargs):
+			self.original_print(self.prefix, *args, **kwargs)
+			
+		builtins.print = custom_print
+		return self
+
+	def __exit__(self, exc_type, exc_val, exc_tb):
+		builtins.print = self.original_print
+		return False
+
 transform = None
 model = None
 bs = None
@@ -97,16 +117,16 @@ def init(new_model):
 def main():
 	errors = []
 
-	print("######### Training TCN (3d-raw)")
-	TCN.main(variant="3d-raw", epochs=15_000)
-	print("######### Training TCN (3d)")
-	TCN.main(variant="3d", epochs=10_000)
+	with prepend_print("TCN (3d-raw)"):
+		TCN.main(variant="3d-raw", epochs=10_000)
+	with prepend_print("TCN (3d)"):
+		TCN.main(variant="3d", epochs=5_000)
 
-	print("######### Tuning Beam Search")
-	BeamSearch.run_tuning()
+	with prepend_print("BeamSearch"):
+		BeamSearch.run_tuning()
 
-	print("######### Training LLM (indefinitely)")
-	LLM.main()
+	with prepend_print("LLM (indefinitely)"):
+		LLM.main()
 
 if __name__ == "__main__":
 	main()

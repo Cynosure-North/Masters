@@ -258,9 +258,13 @@ def train_model(
 				print(message)
 
 		print("Training complete")
+
 	except KeyboardInterrupt:
 		print("Training interrupted")
+
 	finally:
+		save_checkpoint(model, checkpoint_path.with_stem(f"{checkpoint_path.stem}_last"))
+
 		close = getattr(train_corpus, "close", None)
 		if close is not None:
 			close()
@@ -271,7 +275,7 @@ def train_model(
 
 def main(steps=None, *, batch_size=128):
 	"""Train and evaluate a character LM using Common Crawl News."""
-	save_path = Path(__file__).resolve().parent / "trained" / "final_LLM.pth"
+	save_path = Path(__file__).resolve().parent / "trained" / "best_LLM.pth"
 
 	model = instantiate_model(save_path)
 
