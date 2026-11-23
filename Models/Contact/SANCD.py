@@ -235,15 +235,15 @@ def test_model(
 	return overall_loss, overall_accuracy
 
 
-def main(_train_path=None, _validation_path=None, _test_path=None, _bigru_path=None, _save_path=None, variant=VARIANT):
+def main(train_path_=None, validation_path_=None, test_path_=None, bigru_path_=None, save_path_=None, variant=VARIANT):
 	project_dir = Path(__file__).resolve().parent
-	bigru_path = _bigru_path or project_dir / "trained" / "final_BiGRU.pth"
+	bigru_path = bigru_path_ or project_dir / "trained" / "final_BiGRU.pth"
 	bert_path = project_dir / "trained" / "best_BERT.pth"
-	save_path = _save_path or project_dir / "trained" / "final_SANCD"
+	save_path = save_path_ or project_dir / "trained" / "final_SANCD"
 	data_dir = project_dir / "data" / (variant or "geometric")
-	train_path = _train_path or data_dir / "train.csv"
-	validation_path = _validation_path or data_dir / "validation.csv"
-	test_path = _test_path or data_dir / "test.csv"
+	train_path = train_path_ or data_dir / "train.csv"
+	validation_path = validation_path_ or data_dir / "validation.csv"
+	test_path = test_path_ or data_dir / "test.csv"
 
 	loader_kwargs = { "batch_size": 64, "collate_fn": pad_variable, "num_workers": 2, "pin_memory": True }
 

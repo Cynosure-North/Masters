@@ -247,13 +247,13 @@ def test_model(
 	accuracy = total_correct / total_count if total_count else 0.0
 	return total_loss / batch_count, accuracy
 
-def main(_train_path=None, _validation_path=None, _test_path=None, _save_path=None, variant=VARIANT):
+def main(train_path_=None, validation_path_=None, test_path_=None, save_path_=None, variant=VARIANT):
 	project_dir = Path(__file__).resolve().parent
-	save_path = _save_path or project_dir / "trained" / "final_BiGRU.pth"
+	save_path = save_path_ or project_dir / "trained" / "final_BiGRU.pth"
 	data_dir = project_dir / "data" / (variant or "geometric")
-	train_path = _train_path or data_dir / "train"
-	validation_path = _validation_path or data_dir / "validation"
-	test_path = _test_path or data_dir / "test"
+	train_path = train_path_ or data_dir / "train"
+	validation_path = validation_path_ or data_dir / "validation"
+	test_path = test_path_ or data_dir / "test"
 
 	loader_kwargs = {"batch_size": 64, "collate_fn": pad_variable, "num_workers": 2, "pin_memory": True}
 

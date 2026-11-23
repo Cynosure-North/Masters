@@ -7,10 +7,10 @@ from pathlib import Path
 class Phase1:
 	"""Coordinates current folder and quote state for each recording block."""
 
-	def __init__(self, pipe, root_dir: Path, _quote_bank: list[str], duration_minutes: float = 8):
+	def __init__(self, pipe, root_dir: Path, quote_bank_: list[str], duration_minutes: float = 8):
 		self.pipe = pipe
 		self.root_dir = root_dir
-		self.quote_bank = _quote_bank
+		self.quote_bank = quote_bank_
 		self.current_folder = None
 		self.duration_seconds = duration_minutes * 60
 
