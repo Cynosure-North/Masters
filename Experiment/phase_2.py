@@ -69,10 +69,10 @@ class Phase2:
 
 				if step == "calibration":
 					label.config(text=f"Change surface to {folder}\npress the left pedal button when you're ready\n({(stage_index+2)//2}/{len(stages)//2})",
-					             highlightbackground="red", highlightthickness=20)
+									highlightbackground="red", highlightthickness=20)
 				else:
 					label.config(text="Type the following quotes\npress the left pedal button when you're ready",
-					             highlightbackground="red", highlightthickness=20)
+									highlightbackground="red", highlightthickness=20)
 
 
 		def next_calibration():
@@ -108,7 +108,7 @@ class Phase2:
 				self.pipe.send("stop")
 
 			label.config(text="Experiment completed\n\nThank you for participating",
-			             highlightbackground="red", highlightthickness=20)
+							highlightbackground="red", highlightthickness=20)
 			window.after(15_000, window.destroy)
 
 		def on_left_pedal_button(_event: tk.Event) -> None:

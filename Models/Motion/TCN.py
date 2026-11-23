@@ -321,14 +321,14 @@ def main(train_path_=None, validation_path_=None, test_path_=None, save_path_=No
 	trained_model = train_model(
 		model,
 		train_dataloader,
-		checkpoint_path=save_path.with_stem(save_path.stem.replace("final_", "")),
+		checkpoint_path=save_path.with_stem(save_path.stem.replace("best_", "")),
 		epochs=epochs,
 		validation_dataloader=validation_dataloader,
 		patience=-1)
 
 	# print("training complete")
 	save_checkpoint(trained_model, save_path,
-		cleanup_previous=save_path.stem.replace("final_", ""))
+		cleanup_previous=save_path.stem.replace("best_", ""))
 
 	loss, accuracy, char_accuracy = test_model(trained_model, test_dataloader)
 	print(f"Test Loss: {loss:.4f}")

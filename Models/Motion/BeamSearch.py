@@ -196,10 +196,8 @@ def tune_alpha_beta(
 	labels,
 	language_model,
 	*,
-	# alpha_values=(0, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9),
-	# beta_values=(0, 1, 3, 5, 7, 9, 11, 13),
-	alpha_values=(0.1, 0.2),
-	beta_values=(5, 9),
+	alpha_values=(0, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9),
+	beta_values=(0, 1, 3, 5, 7, 9, 11, 13),
 ):
 	""" Grid-search decoder weights on arrays or sentence-named .npy exports """
 
@@ -245,8 +243,8 @@ def run_tuning():
 	else:
 		print("Using TCN output")
 
-		llm_path = project_dir / "trained" / "final_LLM.pth"
-		tcn_path = project_dir / "trained" / "final_TCN_3d-raw.pth"
+		llm_path = project_dir / "trained" / "best_LLM.pth"
+		tcn_path = project_dir / "trained" / "best_TCN_3d-raw.pth"
 		data_path = project_dir / "data" / "3d-raw" / "train"
 
 		tcn = TCN.instantiate_model(tcn_path).eval()

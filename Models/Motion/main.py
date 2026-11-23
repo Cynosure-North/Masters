@@ -105,20 +105,20 @@ def init(new_model):
 
 	if new_model == "raw":
 		transform = data.interactive_diff
-		model = TCN.instantiate_model(model_dir / "final_TCN_3d_simple.pth")
+		model = TCN.instantiate_model(model_dir / "best_TCN_3d_simple.pth")
 	else:
 		transform = data.interactive_transform
-		model = TCN.instantiate_model(model_dir / "final_TCN_3d.pth")
+		model = TCN.instantiate_model(model_dir / "best_TCN_3d.pth")
 
-	bs = BeamSearch.BeamSearcher(model_dir / "final_LLM.pth").incremental_prefix_beam_search
+	bs = BeamSearch.BeamSearcher(model_dir / "best_LLM.pth").incremental_prefix_beam_search
 
 	return _interactive
 
 def main():
-	with prepend_print("TCN (3d-raw)"):
-		TCN.main(variant="3d-raw", epochs=10_000)
 	with prepend_print("TCN (3d)"):
 		TCN.main(variant="3d", epochs=10_000)
+	with prepend_print("TCN (3d-raw)"):
+		TCN.main(variant="3d-raw", epochs=10_000)
 
 	with prepend_print("BeamSearch"):
 		BeamSearch.run_tuning()

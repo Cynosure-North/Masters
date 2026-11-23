@@ -302,11 +302,11 @@ def main(steps=None, *, batch_size=128):
 		model,
 		train_corpus,
 		validation_corpus,
-		checkpoint_path=save_path.with_stem(save_path.stem.replace("final_", "")),
+		checkpoint_path=save_path.with_stem(save_path.stem.replace("best_", "")),
 		steps=steps,
 		batch_size=batch_size)
 	save_checkpoint(model, save_path,
-		cleanup_previous=save_path.stem.replace("final_", ""))
+		cleanup_previous=save_path.stem.replace("best_", ""))
 
 	loss, perplexity = test_model(trained_model, test_corpus)
 	print(f"Test Loss: {loss:.4f}")
