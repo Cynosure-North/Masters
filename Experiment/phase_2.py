@@ -7,11 +7,12 @@ import sys
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from Models.Motion.main import init as motion_init
 from Models.Contact.main import init as contact_init
+import editdistance
 
 # I can use one of the pedal buttons as backspace (probably the middle one)
-phaser = None
+phase = None
 def handle_frame(frame):
-	phaser._handle_frame(frame)
+	phase._handle_frame(frame)
 
 class Phase2:
 	"""Coordinates current folder and quote state for each recording block."""
@@ -19,38 +20,60 @@ class Phase2:
 		self.model_name = None
 		self.model = None
 		self.transform = None
-		self.text = ""
+
+		self.raw_text = ""
 		self.dropped_chars = []
 
-		global phaser
-		phaser = self
+		self.frames = []
+		self.keystrokes[]
+
+		global phase
+		phase = self
 
 	@property
-	def display_string(self):
-		if self.text:
+	def display_text(self):
+		if self.raw_text:
 			if self.model_name is not None and "contact" in self.model_name:
-				return self.text
+				return self.raw_text
 			else:
-				return "".join([x for x,y in zip(self.text, self.dropped_chars) if not y])
+				return "".join([x for x,y in zip(self.raw_text, self.dropped_chars) if not y])
 		return ""
 
 	def _handle_frame(self, frame):
 		res = self.model(frame)
 
-		if self.model_name is not None and "contact" in self.model_name:
-			self.text += str(res)
-		else:
-			if res != self.text:
-				self.text = res(res)
-				self.dropped_chars.append(False)
+		if self.model_name is not None:
+			if "contact" in self.model_name:
+				self.raw_text += str(res)
+			else:
+				self.raw_text = res
+
+			self.dropped_chars.append(False)		# TODO: If the text changes too much the masking will get weird
+
+		# TODO: also save frame (in its totality)
+		# And if the system triggered a keystroke, what keystroke/what is the string so far
+		# Also record backspaces
 
 	def _change_model(self, model_name):
 		if "motion" in model_name:
 			self.model = motion_init(model_name)
+			self.dropped_chars = []
 		else:
 			self.model = contact_init(model_name)
+			self.dropped_chars = ""
 		self.model_name = model_name
-		self.text = ""
+		self.raw_text = ""
+
+
+	def save_quote(time_taken, wpm, corrected_errors, uncorrected_errors):
+		pass
+		{ "quote": self.quote,
+		  "time_taken": time_taken,
+		  "wpm": wpm,
+		  "corrected_errors": corrected_errors,
+		  "uncorrected_errors": uncorrected_errors,
+		  "keystroke_log": self.keystroke_log
+		  "frames": self.frames }
 
 
 	def run(self) -> None:
@@ -84,19 +107,23 @@ class Phase2:
 				next_stage()
 			else:
 				calibration_count += 1
-				self._start_recording()
-				label.config(text=f"Do the calibration motion\n({calibration_count}/10)", highlightthickness=0)
 
 		def next_quote() -> None:
-			nonlocal current_quote, end_time
+			nonlocal current_quote, start_time
 
-			if dt.datetime.now() >= end_time:
-				current_quote, end_time = None, None
-				next_stage()
-			else:
-				current_quote = random.choice(self.quote_bank)
-				self._start_recording()
-				label.config(text=current_quote, highlightthickness=0)
+			time_taken = (dt.datetime.now() - start_time).total_seconds()
+			wpm = len(self.display_text)/(time_taken/60)	# TODO: I recall they standardised on a word being 5 chars + space
+
+			total_errors = editdistance.eval(current_quote, self.raw_text)
+			uncorrected_errors = editdistance.eval(current_quote, self.display_text)
+			corrected_errors = total_errors - uncorrected_errors
+			# save recording, frames, vals
+
+			
+			# Gen new quote
+
+			self._start_recording()
+			label.config(text=f"Do the calibration motion\n({calibration_count}/10)", highlightthickness=0)
 
 		def end_of_experiment():
 			window.unbind("<F13>")
@@ -112,51 +139,23 @@ class Phase2:
 			window.after(15_000, window.destroy)
 
 		def on_left_pedal_button(_event: tk.Event) -> None:
-			nonlocal stage_index, end_time, calibration_count
-			print(f"step: {step}")
-			if step == "calibration" and calibration_count == 0:
-				if self.pipe:
-					self.pipe.put("folder")	# trigger recalibration
-				next_calibration()
-			elif step == "typing" and end_time is None:
-				end_time = dt.datetime.now() + dt.timedelta(seconds=self.duration_seconds)
-				next_quote()
+			pass
 
 		def on_right_pedal_button(_event: tk.Event) -> None:
-			nonlocal calibration_count, current_quote, step, middle_pedal_count
-
-			# the middle pedal triggers twice per press
-			middle_pedal_count += 1
-			if middle_pedal_count % 2 == 1:
-				return
-
-			if step == "calibration" and calibration_count != 0:
-				self._finish_recording(f"calibration_{calibration_count-1}")
-				next_calibration()
-			if step == "typing" and current_quote is not None:
-				self._finish_recording(current_quote)
+			if current_quote is not None:	# TODO: and reasonably near end
 				next_quote()
 
 		def on_middle_pedal_button(_event: tk.Event) -> None:
-			if self.text:
-				if self.model_name is not None and "contact" in self.model_name:
-					self.text = self.text[:-1]
-				else:
-					self.dropped_chars[-1] = True
-
-		folder_names = ["table", "pipe", "cushion", "legs"]
-		random.shuffle(folder_names)
-		with open(self.root_dir / "surface_order", 'w') as f:
-			f.write(str(folder_names))
-
-		stages = [(folder, step) for folder in folder_names for step in ("calibration", "typing")]
+			if self.raw_text:
+				self.dropped_chars[-1] = True
+				
+				# TODO: And log
 
 		stage_index = -1
 		step = None
 		calibration_count = 0
 		current_quote = None
-		end_time = None
-		middle_pedal_count = 0
+		start_time = None
 
 		window = tk.Tk()
 		window.attributes('-fullscreen', True)
