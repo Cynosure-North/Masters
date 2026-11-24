@@ -40,7 +40,7 @@ class MotionDataset(torch.utils.data.Dataset):
 		self.files = sorted(
 			file_path for file_path in self.path.rglob("*/*.npy")
 			if not file_path.stem.endswith("_typo")
-			# and not any([x in str(file_path) for x in ["session_70617e90", "session_79fedad0", "session_85ad194a", "session_a2598998", "session_f81263ce", "session_fce7566b"]])
+			and not any([x in str(file_path) for x in ["session_62a08473", "session_79fedad0", "session_85ad194a", "session_582f5770", "session_874f6161", "session_2474e5e5", "session_bdd5e9a9"]])
 			)
 		if not self.files:
 			raise ValueError(f"Motion dataset directory is empty: {self.path}")
