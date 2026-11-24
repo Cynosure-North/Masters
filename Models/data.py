@@ -172,6 +172,8 @@ def preprocess():
 
 if __name__ == "__main__":
 	preprocess()
+
+# Not proportions
 # 'session_2474e5e5': 'cushion': [0.0666],	'legs': [0.0],		'pipe': [0.1428],	'table': [0.0714]	= 0.2808
 # 'session_32d94b77': 'cushion': [0.1470],	'legs': [0.2121],	'pipe': [0.1129],	'table': [0.125]	= 0.5970
 # 'session_4931439e': 'cushion': [0.0408],	'legs': [0.0222],	'pipe': [0.1764],	'table': [0.0769]	= 0.3163
@@ -200,6 +202,3 @@ if __name__ == "__main__":
 
 # table	.1731
 # 0.0714 + 0.125 + 0.0769 + 0.0652 + 0.0 + 0.1931 + 0.06 + 0.1475 + 0.2549 + 0.0806 + 1.0344 + 0.0612 + 0.0 + 0.2777 + 0.1489
-
-
-["session_62a08473", "session_79fedad0", "session_85ad194a", "session_582f5770", "session_874f6161", "session_2474e5e5", "session_bdd5e9a9"]])

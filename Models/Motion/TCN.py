@@ -197,14 +197,14 @@ def train_model(
 				batch_count += 1
 
 			epoch_loss /= max(batch_count, 1)
-			message = f"Epoch {epoch:<3n} -- train loss: {epoch_loss:9.6f}"
+			message = f"Epoch {epoch:<5n} -- train loss: {epoch_loss:9.6f}"
 
 			if validation_dataloader is not None:
-				validation_loss, _, _ = test_model(model, validation_dataloader)
+				validation_loss, char_accuracy, _ = test_model(model, validation_dataloader)
 				message += f" -- validation loss: {validation_loss:9.6f}"
 				if validation_loss < best_validation_loss - min_delta:
 					if patience == -1:
-						message += " new best"
+						message += f" new best, char accuracy: {char_accuracy}"
 
 					checkpoint = checkpoint_path.with_stem(f"{checkpoint_path.stem}_{epoch}")
 
@@ -338,3 +338,9 @@ def main(train_path_=None, validation_path_=None, test_path_=None, save_path_=No
 
 if __name__ == "__main__":
 	main()
+
+# TODO: the loss of of the 3d model is half of 3d-raw, and yet the character accuracy of 3d-raw is ~.5 higher
+# What's going on there
+# Also why are they both so low?
+#
+# Overfitting may be happening

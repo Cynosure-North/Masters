@@ -1,10 +1,10 @@
 import sys
-import time
 from threading import Lock
 from natnet import DataFrame, NatNetClient
 from phase_2 import handle_frame
 from parse_optitrack import calculate_origin, frame_point_array
 
+# TODO: I want proper optitrack recordings, not my jank
 
 class OptiTrackRecorder:
 	def __init__(self):
@@ -24,7 +24,7 @@ class OptiTrackRecorder:
 			# Start the receiver before requesting model definitions. The response is
 			# asynchronous and must not depend on a one-shot synchronous read.
 			self.streaming_client.run_async()
-			self.streaming_client.request_modeldef()
+			self.streaming_client.request_modeldef()		# TODO: May want to redo pipe to enable recalibration
 
 			print("OptiTrack server started.")
 
@@ -40,12 +40,12 @@ class OptiTrackRecorder:
 		frame = frame_point_array(data_frame, self.data_description, self.calibrated_origin)
 		if frame is not None:
 
-			# Keeps retrying until it sticks
+			# Keep retrying until it sticks
 			if self.calibrated_origin is None:
 				self.calibrated_origin = calculate_origin(self.frames)
 
 			if self.calibrated_origin is not None:
-				handle_frame(frame)
+				handle_frame(data_frame, frame)		# TODO: may not be able to do interprocess calls
 
 
 if __name__ == "__main__":

@@ -89,26 +89,44 @@ import BERT
 import BiGRU
 import SANCD
 
+import builtins
+from contextlib import ContextDecorator
+class prepend_print(ContextDecorator):
+	def __init__(self, prefix):
+		self.prefix = prefix
 
+	def __enter__(self):
+		self.original_print = builtins.print
+		print(f"######### Training {self.prefix}")
+		
+		def custom_print(*args, **kwargs):
+			self.original_print(self.prefix + ": ", *args, **kwargs)
+			
+		builtins.print = custom_print
+		return self
+
+	def __exit__(self, _exc_type, _exc_val, _exc_tb):
+		builtins.print = self.original_print
+		return False
 
 def train():
 	"""Train the component models before fine-tuning the complete SANCD model."""
-	print("######### Training BiGRU")
-	BiGRU.main(variant="")
-	print("######### Training BiGRU (3d-simple)")
-	BiGRU.main(variant="3d-simple")
-	print("######### Training BiGRU (3d)")
-	BiGRU.main(variant="3d")
+	with prepend_print("BiGRU"):
+		BiGRU.main(variant="")	# TODO: set epochs
+	with prepend_print("BiGRU (3d-simple)"):
+		BiGRU.main(variant="3d-simple")
+	with prepend_print("BiGRU (3d)"):
+		BiGRU.main(variant="3d")
 
-	print("######### Training BERT")
-	BERT.main(epochs=10)
+	with prepend_print("BERT"):
+		BERT.main(epochs=10)
 
-	print("######### Training SANCD")
-	SANCD.main(variant="")
-	print("######### Training SANCD (3d-simple)")
-	SANCD.main(variant="3d-simple")
-	print("######### Training SANCD (3d)")
-	SANCD.main(variant="3d")
+	with prepend_print("SANCD"):
+		SANCD.main(variant="")
+	with prepend_print("SANCD (3d-simple)"):
+		SANCD.main(variant="3d-simple")
+	with prepend_print("SANCD (3d)"):
+		SANCD.main(variant="3d")
 
 
 if __name__ == "__main__":

@@ -93,28 +93,28 @@ class prepend_print(ContextDecorator):
 transform = None
 model = None
 bs = None
-def _interactive(frame):
-	if (data := transform(frame)) is not None:
-		return bs(model(data))
+def interactive(frame):
+	if transform and model and bs:
+		if (data := transform(frame)) is not None:
+			return bs(model(data))
 
 	return None
 
-def init(new_model):
+def init_model(new_model="3d-raw"):
 	global transform, model, bs
 	model_dir = Path(__file__).parent / "trained"
 
-	if new_model == "raw":
+	if "raw" in new_model:
 		transform = data.interactive_diff
-		model = TCN.instantiate_model(model_dir / "best_TCN_3d_simple.pth")
+		model = TCN.instantiate_model(model_dir / "best_TCN_3d-raw.pth")
 	else:
 		transform = data.interactive_transform
 		model = TCN.instantiate_model(model_dir / "best_TCN_3d.pth")
 
 	bs = BeamSearch.BeamSearcher(model_dir / "best_LLM.pth").incremental_prefix_beam_search
 
-	return _interactive
-
-def main():
+	return interactive
+def train():
 	with prepend_print("TCN (3d)"):
 		TCN.main(variant="3d", epochs=10_000)
 	with prepend_print("TCN (3d-raw)"):
@@ -127,4 +127,4 @@ def main():
 		LLM.main()
 
 if __name__ == "__main__":
-	main()
+	train()
