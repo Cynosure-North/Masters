@@ -20,7 +20,7 @@ contact_data_dir_simple = models_root / "contact" / "data" / "3d-simple"
 motion_data_dir = models_root / "Motion" / "data" / "3d"
 motion_data_dir_raw = models_root / "Motion" / "data" / "3d-raw"
 # data_dirs = [pose_data_dir, contact_data_dir, contact_data_dir_simple, motion_data_dir, motion_data_dir_raw]
-data_dirs = [motion_data_dir, motion_data_dir_raw]
+data_dirs = [motion_data_dir_raw]
 cache_dir = models_root / "_cache"
 cache_dir.mkdir(exist_ok=True)
 
@@ -30,7 +30,8 @@ typo_ratios = defaultdict(lambda: defaultdict(list))
 def file_generator(data_folder):
 	for participant in sorted(data_folder.iterdir()):
 
-		if participant.name in ["session_62a08473", "session_79fedad0", "session_85ad194a", "session_582f5770", "session_874f6161", "session_2474e5e5", "session_bdd5e9a9"]:
+		
+		if participant.name not in ["session_62a08473", "session_79fedad0", "session_85ad194a", "session_582f5770", "session_874f6161", "session_2474e5e5", "session_bdd5e9a9", "session_f81263ce"]:
 			continue
 
 		for surface in sorted(participant.iterdir()):
@@ -63,6 +64,8 @@ def file_generator(data_folder):
 						# Catches 0-length records
 						# print(f"Zero length record: {f}")
 						continue
+
+					frames = np.delete(frames, [0, 1, 7, 8], axis=1)
 
 					if filename:
 						out.append((f.stem, frames))
@@ -130,7 +133,7 @@ def preprocess():
 			# # Simplified version only has UV coordinates of contact points and hand rest position
 			# np.save(contact_data_dir_simple / output_file, contact_frames[:, :4])
 
-			np.save(motion_data_dir / output_file, motion.transform(frames, left_hand, right_hand))
+			# np.save(motion_data_dir / output_file, motion.transform(frames, left_hand, right_hand))
 			np.save(motion_data_dir_raw / output_file, np.diff(frames, axis=0))
 
 	# for _, sentences, _, _ in file_generator(raw_data_folder):
@@ -151,23 +154,23 @@ def preprocess():
 	# preprocess_checkpoint = pose.get_preprocessor_state()
 	# np.save(preprocess_checkpoint, pose_data_dir / "preprocessor_params")
 
-	participant_avg = defaultdict(list)
-	surface_avg = defaultdict(list)
+	# participant_avg = defaultdict(list)
+	# surface_avg = defaultdict(list)
 
-	for participant, surface in typo_ratios.items():
-		for vals in surface.values():
-			surface_avg[surface].append(vals)
-			participant_avg[surface].append(vals)
+	# for participant, surface in typo_ratios.items():
+	# 	for vals in surface.values():
+	# 		surface_avg[surface].append(vals)
+	# 		participant_avg[surface].append(vals)
 	
-	message = "Surface error averages -- "
-	for k, v in surface_avg:
-		message += f"{k}: {sum(v) / len(v):.2%} "
-	print(message)
+	# message = "Surface error averages -- "
+	# for k, v in surface_avg:
+	# 	message += f"{k}: {sum(v) / len(v):.2%} "
+	# print(message)
 
-	message = "Participant error averages -- "
-	for k, v in participant_avg:
-		message += f"{k}: {sum(v) / len(v):.2%} "
-	print(message)
+	# message = "Participant error averages -- "
+	# for k, v in participant_avg:
+	# 	message += f"{k}: {sum(v) / len(v):.2%} "
+	# print(message)
 
 
 if __name__ == "__main__":
@@ -202,3 +205,37 @@ if __name__ == "__main__":
 
 # table	.1731
 # 0.0714 + 0.125 + 0.0769 + 0.0652 + 0.0 + 0.1931 + 0.06 + 0.1475 + 0.2549 + 0.0806 + 1.0344 + 0.0612 + 0.0 + 0.2777 + 0.1489
+
+
+# session_32d94b77 - allegedly the wrists are four metres from the fingertips
+# session_62a08473   wrist vectors point quite steeply up
+# session_75a19362 - allegedly the wrists are four metres from the fingertips
+# session_79fedad0   wrist vectors point quite steeply up
+# session_85ad194a   wrist vectors point quite steeply up
+# session_582f5770   plane not flat
+# session_874f6161   plane not flat, wrist vectors in plane
+# session_2474e5e5   wrist vectors point akimbo
+# session_70617e90 - allegedly the wrists are four metres from the fingertips
+# session_4931439e - allegedly the wrists are four metres from the fingertips
+# session_a2598998 - allegedly the wrists are four metres from the fingertips
+# session_bdd5e9a9   no right wrist vector
+# session_c562cfdc - allegedly the wrists are four metres from the fingertips
+# session_f81263ce - wrist vectors point about 45deg off to the left
+# session_fce7566b - wrists are facing in opposite directions and frequent wrist vector dropouts
+#
+# session_32d94b77 - all points in a line
+# session_62a08473 
+# session_75a19362 - all points in a line
+# session_79fedad0 
+# session_85ad194a 
+# session_582f5770 
+# session_874f6161 
+# session_2474e5e5 
+# session_70617e90 - all points in a line
+# session_4931439e - all points in a line
+# session_a2598998 - all points in a line
+# session_bdd5e9a9
+# session_c562cfdc - all points in a line
+# session_f81263ce
+# session_fce7566b - left hand flipped upside down
+#

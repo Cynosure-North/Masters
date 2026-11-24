@@ -26,7 +26,7 @@ POINT_NAMES = [
 
 
 def vis_raw():
-	first_file = Path(r"H:\Research_Data\Morgana North(MHIT)\phase1\session_c562cfdc\table\beware the ides of march")
+	first_file = Path(r"H:\Research_Data\Morgana North(MHIT)\phase1\session_32d94b77\legs\a fox is a very smart animal")
 
 	# data stores per-frame deltas of shape (n_frames, n_points, 3)
 	record = eval(first_file.read_text(), {"__builtins__": {}, "array": np.array})
@@ -41,10 +41,10 @@ def vis_raw():
 	t_values = np.linspace(0, 10, num_steps)
 
 	# Indices 2 and 9 are vectors originating at reconstructed indices 1 and 8
-	origin_indices = [0, 7]
-	vector_indices = [1, 8]
+	# origin_indices = [0, 7]
+	# vector_indices = [1, 8]
 	point_mask = np.ones(14, dtype=bool)
-	point_mask[vector_indices] = False
+	point_mask[[0,1,7,8]] = False
 
 	pt_indices = np.flatnonzero(point_mask)
 	pt_labels = [POINT_NAMES[i] for i in pt_indices]
@@ -54,28 +54,28 @@ def vis_raw():
 	pt_coords = coords[:, point_mask, :]
 	x_pts, z_pts, y_pts = -pt_coords[:, :, 0], pt_coords[:, :, 1], pt_coords[:, :, 2]
 
-	vec_origins = coords[:, origin_indices, :]  # shape: (n_frames, 2, 3)
-	vec_dirs = coords[:, vector_indices, :]        # per-frame delta vectors: (n_frames, 2, 3)
+	# vec_origins = coords[:, origin_indices, :]  # shape: (n_frames, 2, 3)
+	# vec_dirs = coords[:, vector_indices, :]        # per-frame delta vectors: (n_frames, 2, 3)
 
 	# 2. Set up the figure and 3D axis
 	fig = plt.figure(figsize=(8, 7))
 	plt.subplots_adjust(bottom=0.2)
 	ax = fig.add_subplot(111, projection="3d")
 
-	def draw_vectors(step):
-		ox = vec_origins[step, :, 0]
-		oy = vec_origins[step, :, 2]
-		oz = vec_origins[step, :, 1]
-		u = vec_dirs[step, :, 0]
-		v = vec_dirs[step, :, 2]
-		w = vec_dirs[step, :, 1]
-		return ax.quiver(
-			-ox, oy, oz, -u, v, -w,
-			color="black",
-			linewidth=2,
-			normalize=False,
-			length=0.05,
-		)
+	# def draw_vectors(step):
+	# 	ox = vec_origins[step, :, 0]
+	# 	oy = vec_origins[step, :, 2]
+	# 	oz = vec_origins[step, :, 1]
+	# 	u = vec_dirs[step, :, 0]
+	# 	v = vec_dirs[step, :, 2]
+	# 	w = vec_dirs[step, :, 1]
+	# 	return ax.quiver(
+	# 		-ox, oy, oz, -u, v, -w,
+	# 		color="black",
+	# 		linewidth=2,
+	# 		normalize=False,
+	# 		length=0.05,
+	# 	)
 
 	def draw_labels(step):
 		return [
@@ -93,7 +93,7 @@ def vis_raw():
 		facecolors=pt_rgba,
 		s=50,
 	)
-	quiver = draw_vectors(initial_step)
+	# quiver = draw_vectors(initial_step)
 	text_labels = draw_labels(initial_step)
 
 
@@ -133,14 +133,15 @@ def vis_raw():
 
 	# 5. Define the update function
 	def update(val):
-		nonlocal quiver, text_labels
+		# nonlocal quiver, text_labels
+		nonlocal text_labels
 		step = int(time_slider.val)
 
 		scatter._offsets3d = (x_pts[step], y_pts[step], z_pts[step])
 		scatter.set_facecolors(pt_rgba)
 
-		quiver.remove()
-		quiver = draw_vectors(step)
+		# quiver.remove()
+		# quiver = draw_vectors(step)
 
 		for txt in text_labels:
 			txt.remove()
@@ -151,6 +152,7 @@ def vis_raw():
 
 	time_slider.on_changed(update)
 
+	plt.get_current_fig_manager().full_screen_toggle()
 	plt.show()
 
 
