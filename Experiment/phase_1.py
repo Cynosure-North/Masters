@@ -95,7 +95,7 @@ class Phase1:
 			print(f"step: {step}")
 			if step == "calibration" and calibration_count == 0:
 				if self.pipe:
-					self.pipe.put("folder")	# trigger recalibration
+					self.pipe.put("reset")	# trigger recalibration
 				next_calibration()
 			elif step == "typing" and end_time is None:
 				end_time = dt.datetime.now() + dt.timedelta(seconds=self.duration_seconds)

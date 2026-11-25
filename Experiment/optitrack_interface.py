@@ -52,7 +52,7 @@ class OptiTrackRecorder:
 						self.rejected_frames = 0
 				elif message == "stop":	# End session
 					break
-				elif message == "folder":	# recalibrate for a new surface
+				elif message == "reset":	# recalibrate for a new surface
 					self.calibrated_origin = None
 				elif message != "":		# End recording
 					with self._state_lock:
@@ -61,8 +61,7 @@ class OptiTrackRecorder:
 						rejected_frames = self.rejected_frames
 					print(
 						f"Saving {len(frames)} frames to {message} "
-						f"(received={received_frames}, rejected={rejected_frames})"
-					)
+						f"(received={received_frames}, rejected={rejected_frames})")
 					with open(Path(message), 'w') as file:
 						file.write(str(frames))
 
