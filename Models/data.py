@@ -19,8 +19,9 @@ contact_data_dir = models_root / "contact" / "data" / "3d"
 contact_data_dir_simple = models_root / "contact" / "data" / "3d-simple"
 motion_data_dir = models_root / "Motion" / "data" / "3d"
 motion_data_dir_raw = models_root / "Motion" / "data" / "3d-raw"
+motion_data_dir_no_diff = models_root / "Motion" / "data" / "3d-raw_no-diff"
 # data_dirs = [pose_data_dir, contact_data_dir, contact_data_dir_simple, motion_data_dir, motion_data_dir_raw]
-data_dirs = [motion_data_dir_raw]
+data_dirs = [motion_data_dir_no_diff]
 cache_dir = models_root / "_cache"
 cache_dir.mkdir(exist_ok=True)
 
@@ -134,7 +135,7 @@ def preprocess():
 			# np.save(contact_data_dir_simple / output_file, contact_frames[:, :4])
 
 			# np.save(motion_data_dir / output_file, motion.transform(frames, left_hand, right_hand))
-			np.save(motion_data_dir_raw / output_file, np.diff(frames, axis=0))
+			np.save(motion_data_dir_no_diff / output_file, frames)
 
 	# for _, sentences, _, _ in file_generator(raw_data_folder):
 	# 	for _, frames in sentences:
@@ -233,6 +234,3 @@ if __name__ == "__main__":
 # session_c562cfdc - all points in a line
 # session_f81263ce
 # session_fce7566b - left hand at weird angle (could help overfitting?)
-
-
-# TODO: the model is overfitting, I should look into data augmentation

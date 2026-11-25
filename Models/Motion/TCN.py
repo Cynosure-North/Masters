@@ -46,7 +46,7 @@ class ResidualTCNBlock(nn.Module):
 # Not sure how they got 46 frames, their parameters only give 19
 class TCN(nn.Module):
 	# num_classes has one extra character for the non-character class (nothing is pressed)
-	def __init__(self, input_features=42, num_classes=len(chars)+1, hidden_channels=(64, 64, 32), kernel_size=2, dilation=3, dropout=0.2):
+	def __init__(self, input_features=42, num_classes=len(chars)+1, hidden_channels=(64, 64, 32), kernel_size=2, dilation=3, dropout=0.4):
 		super().__init__()
 
 		self.input_features = input_features

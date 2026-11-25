@@ -77,6 +77,40 @@ class MotionDataset(torch.utils.data.Dataset):
 	def __len__(self):
 		return len(self.files)
 
+	def augment_features(self, features):
+		# Translate
+		for i in range(3):
+			if random.randint(0,2) == 0:
+				features[:, :, i] += random.random() / 20
+
+		# Scale
+		if random.random() > 0.5:
+			features *= random.random() + 0.5
+
+		# Rotate
+		def random_rotation_matrix(rng: np.random.Generator | None = None) -> np.ndarray:
+			"""Return a uniform random 3D rotation matrix R of shape (3, 3) with det(R) = +1."""
+			if rng is None:
+				rng = np.random.default_rng()
+
+			A = rng.standard_normal((3, 3))
+			Q, R_upper = np.linalg.qr(A)
+
+			# Ensure right-handedness (det(Q) = +1) rather than a reflection (det(Q) = -1)
+			signs = np.sign(np.diag(R_upper))
+			signs[signs == 0] = 1.0
+			Q = Q * signs
+
+			if np.linalg.det(Q) < 0:
+				Q[:, -1] *= -1.0
+
+			return Q
+
+		if random.random() > 0.7:
+			features @= random_rotation_matrix().T
+
+		return np.diff(features, axis=0)
+
 	def __getitem__(self, idx):
 		file_path = self.files[idx]
 		_, separator, label = file_path.stem.partition("_")
@@ -101,6 +135,9 @@ class MotionDataset(torch.utils.data.Dataset):
 			raise ValueError(
 				f"Motion record {idx} has {feature_count} features per frame; "
 				f"expected {self.input_features}")
+
+		features = self.augment_features(features)
+			
 		features = self.scaler.transform(features.reshape(features.shape[0], feature_count))
 
 		targets = torch.tensor([chars.index(char) for char in label], dtype=torch.long)
