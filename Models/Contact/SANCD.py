@@ -235,7 +235,7 @@ def test_model(
 	return overall_loss, overall_accuracy
 
 
-def main(train_path_=None, validation_path_=None, test_path_=None, bigru_path_=None, save_path_=None, variant=VARIANT):
+def main(train_path_=None, validation_path_=None, test_path_=None, bigru_path_=None, save_path_=None, variant=VARIANT, epochs=-1):
 	project_dir = Path(__file__).resolve().parent
 	bigru_path = bigru_path_ or project_dir / "trained" / "final_BiGRU.pth"
 	bert_path = project_dir / "trained" / "best_BERT.pth"
@@ -267,9 +267,9 @@ def main(train_path_=None, validation_path_=None, test_path_=None, bigru_path_=N
 		model,
 		train_dataloader,
 		checkpoint_path=save_path.with_stem(save_path.stem.replace("final_", "")),
-		bert_epochs=4,
-		bigru_epochs=4,
-		alternating_epochs=6,
+		bert_epochs=epochs,
+		bigru_epochs=epochs,
+		alternating_epochs=epochs*1.5,
 		gradient_clip=0.5,
 		use_amp=True,
 		validation_dataloader=validation_dataloader)

@@ -111,22 +111,18 @@ class prepend_print(ContextDecorator):
 
 def train():
 	"""Train the component models before fine-tuning the complete SANCD model."""
-	with prepend_print("BiGRU"):
-		BiGRU.main(variant="")	# TODO: set epochs
 	with prepend_print("BiGRU (3d-simple)"):
-		BiGRU.main(variant="3d-simple")
+		BiGRU.main(variant="3d-simple", epochs=10_000)
 	with prepend_print("BiGRU (3d)"):
-		BiGRU.main(variant="3d")
+		BiGRU.main(variant="3d", epochs=10_000)
 
 	with prepend_print("BERT"):
 		BERT.main(epochs=10)
 
-	with prepend_print("SANCD"):
-		SANCD.main(variant="")
 	with prepend_print("SANCD (3d-simple)"):
-		SANCD.main(variant="3d-simple")
+		SANCD.main(variant="3d-simple", epochs=1_000)
 	with prepend_print("SANCD (3d)"):
-		SANCD.main(variant="3d")
+		SANCD.main(variant="3d", epochs=1_000)
 
 
 if __name__ == "__main__":

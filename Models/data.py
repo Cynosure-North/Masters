@@ -31,7 +31,7 @@ def file_generator(data_folder):
 	for participant in sorted(data_folder.iterdir()):
 
 		
-		if participant.name not in ["session_62a08473", "session_79fedad0", "session_85ad194a", "session_582f5770", "session_874f6161", "session_2474e5e5", "session_bdd5e9a9", "session_f81263ce"]:
+		if participant.name not in ["session_62a08473", "session_79fedad0", "session_85ad194a", "session_582f5770", "session_874f6161", "session_2474e5e5", "session_bdd5e9a9", "session_f81263ce", "session_fce7566b"]:
 			continue
 
 		for surface in sorted(participant.iterdir()):
@@ -176,37 +176,31 @@ def preprocess():
 if __name__ == "__main__":
 	preprocess()
 
-# Not proportions
-# 'session_2474e5e5': 'cushion': [0.0666],	'legs': [0.0],		'pipe': [0.1428],	'table': [0.0714]	= 0.2808
-# 'session_32d94b77': 'cushion': [0.1470],	'legs': [0.2121],	'pipe': [0.1129],	'table': [0.125]	= 0.5970
-# 'session_4931439e': 'cushion': [0.0408],	'legs': [0.0222],	'pipe': [0.1764],	'table': [0.0769]	= 0.3163
-# 'session_582f5770': 'cushion': [0.0],		'legs': [0.0909],	'pipe': [0.0],		'table': [0.0652]	= 0.1561
-# 'session_62a08473': 'cushion': [0.0952],	'legs': [0.0270],	'pipe': [0.3428],	'table': [0.0]		= 0.4650
-# 'session_70617e90': 'cushion': [0.1616],	'legs': [0.2048],	'pipe': [0.17],		'table': [0.1931]	= 0.7295
-# 'session_75a19362': 'cushion': [0.0666],	'legs': [0.0178],	'pipe': [0.2203],	'table': [0.06]		= 0.3647
-# 'session_79fedad0': 'cushion': [0.2261],	'legs': [0.1875],	'pipe': [0.4081],	'table': [0.1475]	= 0.9692
-# 'session_85ad194a': 'cushion': [0.3720],	'legs': [1.3333],	'pipe': [0.26],		'table': [0.2549]	= 2.2202
-# 'session_874f6161': 'cushion': [0.1363],	'legs': [0.1176],	'pipe': [0.1052],	'table': [0.0806]	= 0.4397
-# 'session_a2598998': 'cushion': [0.7647],	'legs': [0.0740],	'pipe': [0.1333],	'table': [1.0344]	= 2.0064
-# 'session_bdd5e9a9': 'cushion': [0.1176],	'legs': [0.0483],	'pipe': [0.0],		'table': [0.0612]	= 0.2271
-# 'session_c562cfdc': 'cushion': [0.0],		'legs': [0.0937		'pipe': [0.0222],	'table': [0.0]		= 0.1159
-# 'session_f81263ce': 'cushion': [0.125],	'legs': [0.05],		'pipe': [0.6],		'table': [0.2777]	= 1.0527
-# 'session_fce7566b': 'cushion': [0.1707],	'legs': [0.0526],	'pipe': [0.5],		'table': [0.1489]	= 0.8722
+# Typo rates by participant
+# 'session_2474e5e5': 'cushion': [0.0666],	'legs': [0.0],		'pipe': [0.1428],	'table': [0.0714]	= 0.0702
+# 'session_32d94b77': 'cushion': [0.1470],	'legs': [0.2121],	'pipe': [0.1129],	'table': [0.125]	= 0.1492
+# 'session_4931439e': 'cushion': [0.0408],	'legs': [0.0222],	'pipe': [0.1764],	'table': [0.0769]	= 0.0790
+# 'session_582f5770': 'cushion': [0.0],		'legs': [0.0909],	'pipe': [0.0],		'table': [0.0652]	= 0.0390
+# 'session_62a08473': 'cushion': [0.0952],	'legs': [0.0270],	'pipe': [0.3428],	'table': [0.0]		= 0.1162
+# 'session_70617e90': 'cushion': [0.1616],	'legs': [0.2048],	'pipe': [0.17],		'table': [0.1931]	= 0.1823
+# 'session_75a19362': 'cushion': [0.0666],	'legs': [0.0178],	'pipe': [0.2203],	'table': [0.06]		= 0.0911
+# 'session_79fedad0': 'cushion': [0.2261],	'legs': [0.1875],	'pipe': [0.4081],	'table': [0.1475]	= 0.2423
+# 'session_85ad194a': 'cushion': [0.3720],	'legs': [1.3333],	'pipe': [0.26],		'table': [0.2549]	= 0.5550
+# 'session_874f6161': 'cushion': [0.1363],	'legs': [0.1176],	'pipe': [0.1052],	'table': [0.0806]	= 0.1099
+# 'session_a2598998': 'cushion': [0.7647],	'legs': [0.0740],	'pipe': [0.1333],	'table': [1.0344]	= 0.5016
+# 'session_bdd5e9a9': 'cushion': [0.1176],	'legs': [0.0483],	'pipe': [0.0],		'table': [0.0612]	= 0.0567
+# 'session_c562cfdc': 'cushion': [0.0],		'legs': [0.0937		'pipe': [0.0222],	'table': [0.0]		= 0.0289
+# 'session_f81263ce': 'cushion': [0.125],	'legs': [0.05],		'pipe': [0.6],		'table': [0.2777]	= 0.2631
+# 'session_fce7566b': 'cushion': [0.1707],	'legs': [0.0526],	'pipe': [0.5],		'table': [0.1489]	= 0.2180
 
-
+# Typo rates by surface
 # cushion	.1660
-# 0.0666 + 0.1470 + 0.0408 + 0.0 + 0.0952 + 0.1616 + 0.0666 + 0.2261 + 0.3720 + 0.1363 + 0.7647 + 0.1176 + 0.0 + 0.125 + 0.1707
-
-# legs	.1688
-# 0.0 + 0.2121 + 0.0222 + 0.0909 + 0.0270 + 0.2048 + 0.0178 + 0.1875 + 1.3333 + 0.1176 + 0.0740 + 0.0483 + 0.0937 + 0.05 + 0.0526
-
-# pipe	.2129
-# 0.1428 + 0.1129 + 0.1764 + 0.0 + 0.3428 + 0.17 + 0.2203 + 0.4081 + 0.26 + 0.1052 + 0.1333 + 0.0 + 0.0222 + 0.6 + 0.5
-
-# table	.1731
-# 0.0714 + 0.125 + 0.0769 + 0.0652 + 0.0 + 0.1931 + 0.06 + 0.1475 + 0.2549 + 0.0806 + 1.0344 + 0.0612 + 0.0 + 0.2777 + 0.1489
+# legs		.1688
+# pipe		.2129
+# table		.1731
 
 
+# Errors noticed while visualising data
 # session_32d94b77 - allegedly the wrists are four metres from the fingertips
 # session_62a08473   wrist vectors point quite steeply up
 # session_75a19362 - allegedly the wrists are four metres from the fingertips
@@ -223,6 +217,7 @@ if __name__ == "__main__":
 # session_f81263ce - wrist vectors point about 45deg off to the left
 # session_fce7566b - wrists are facing in opposite directions and frequent wrist vector dropouts
 #
+# Fingertips only visualisation
 # session_32d94b77 - all points in a line
 # session_62a08473 
 # session_75a19362 - all points in a line
@@ -237,5 +232,7 @@ if __name__ == "__main__":
 # session_bdd5e9a9
 # session_c562cfdc - all points in a line
 # session_f81263ce
-# session_fce7566b - left hand flipped upside down
-#
+# session_fce7566b - left hand at weird angle (could help overfitting?)
+
+
+# TODO: the model is overfitting, I should look into data augmentation

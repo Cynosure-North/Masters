@@ -39,9 +39,7 @@ class MotionDataset(torch.utils.data.Dataset):
 
 		self.files = sorted(
 			file_path for file_path in self.path.rglob("*/*.npy")
-			if not file_path.stem.endswith("_typo")
-			and not any([x in str(file_path) for x in ["session_62a08473", "session_79fedad0", "session_85ad194a", "session_582f5770", "session_874f6161", "session_2474e5e5", "session_bdd5e9a9"]])
-			)
+			if not file_path.stem.endswith("_typo"))
 		if not self.files:
 			raise ValueError(f"Motion dataset directory is empty: {self.path}")
 
@@ -56,7 +54,7 @@ class MotionDataset(torch.utils.data.Dataset):
 		self.scaler = StandardScaler()
 		params_path = self.path.parent / "preprocessor_params.npy"
 		if not params_path.exists():
-			print("scaler params not found, tuning now")
+			print("preprocessor params not found, tuning now")
 			data = np.concatenate([np.load(file).reshape(-1, self.input_features)
 					for file in (self.path.parent / "train").rglob("*.npy")])
 

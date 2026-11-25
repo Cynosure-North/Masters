@@ -144,62 +144,73 @@ def train_model(
 	best_validation_loss = float("inf")
 	best_checkpoint = None
 	stale_epochs = 0
+	epoch = 0
 
-	for epoch in range(epochs):
-		model.train()
-		batch_count = 0
-		epoch_loss = 0
-		for labels, data in dataloader:
-			# Flatten only at the loss boundary; the recurrent model keeps sequence structure.
-			data = data.to(device, non_blocking=True)
-			if use_augmentation:
-				data = augment_coordinates(data, generator)
-			labels = labels.flatten().to(device, non_blocking=True)
-			model.optimizer.zero_grad(set_to_none=True)
-			with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
-				output = model(data)
-				loss = _loss_for_logits(output, labels, loss_fn)
-			if not torch.isfinite(loss):
-				raise RuntimeError(f"Non-finite loss at epoch {epoch}: {loss.item()}")
-
-			model.scaler.scale(loss).backward()
-			if gradient_clip is not None:
-				model.scaler.unscale_(model.optimizer)
-				torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
-			model.scaler.step(model.optimizer)
-			model.scaler.update()
-
-			batch_count += 1
-			epoch_loss += loss.item()
-
-		epoch_loss /= batch_count
-		message = f"Epoch {epoch:<3n} -- train loss: {epoch_loss:9.6f}"
-
-		if validation_dataloader is not None:
-			validation_loss, _ = test_model(
-				model,
-				validation_dataloader,
-				use_amp=use_amp)
+	try:
+		while epoch != epochs():
 			model.train()
-			message += f", validation loss: {validation_loss:9.6f}"
+			batch_count = 0
+			epoch_loss = 0
+			for labels, data in dataloader:
+				# Flatten only at the loss boundary; the recurrent model keeps sequence structure.
+				data = data.to(device, non_blocking=True)
+				if use_augmentation:
+					data = augment_coordinates(data, generator)
+				labels = labels.flatten().to(device, non_blocking=True)
+				model.optimizer.zero_grad(set_to_none=True)
+				with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
+					output = model(data)
+					loss = _loss_for_logits(output, labels, loss_fn)
+				if not torch.isfinite(loss):
+					raise RuntimeError(f"Non-finite loss at epoch {epoch}: {loss.item()}")
 
-			if validation_loss < best_validation_loss - min_delta:
-				checkpoint = checkpoint_path.with_stem(f"{checkpoint_path.stem}_{epoch}")
+				model.scaler.scale(loss).backward()
+				if gradient_clip is not None:
+					model.scaler.unscale_(model.optimizer)
+					torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
+				model.scaler.step(model.optimizer)
+				model.scaler.update()
 
-				best_validation_loss = validation_loss
-				best_checkpoint = checkpoint
-				stale_epochs = 0
+				batch_count += 1
+				epoch_loss += loss.item()
 
-				save_checkpoint(model, checkpoint)
-			elif patience != -1:
-				stale_epochs += 1
-				message += f", patience: {stale_epochs}/{patience}"
-				if stale_epochs >= patience:
-					print(message)
-					print("Early stopping")
-					break
+			epoch_loss /= batch_count
+			message = f"Epoch {epoch:<3n} -- train loss: {epoch_loss:9.6f}"
 
-		print(message)
+			if validation_dataloader is not None:
+				validation_loss, _ = test_model(
+					model,
+					validation_dataloader,
+					use_amp=use_amp)
+				model.train()
+				message += f", validation loss: {validation_loss:9.6f}"
+
+				if validation_loss < best_validation_loss - min_delta:
+					checkpoint = checkpoint_path.with_stem(f"{checkpoint_path.stem}_{epoch}")
+
+					best_validation_loss = validation_loss
+					best_checkpoint = checkpoint
+					stale_epochs = 0
+
+					save_checkpoint(model, checkpoint)
+				elif patience != -1:
+					stale_epochs += 1
+					message += f", patience: {stale_epochs}/{patience}"
+					if stale_epochs >= patience:
+						print(message)
+						print("Early stopping")
+						break
+
+			epoch += 1
+			print(message)
+
+		print("Training complete")
+
+	except KeyboardInterrupt:
+		print("Training interrupted")
+
+	finally:
+		save_checkpoint(model, checkpoint_path.with_stem(f"{checkpoint_path.stem}_last"))
 
 	if best_checkpoint is not None:
 		model = instantiate_model(best_checkpoint)
@@ -247,7 +258,7 @@ def test_model(
 	accuracy = total_correct / total_count if total_count else 0.0
 	return total_loss / batch_count, accuracy
 
-def main(train_path_=None, validation_path_=None, test_path_=None, save_path_=None, variant=VARIANT):
+def main(train_path_=None, validation_path_=None, test_path_=None, save_path_=None, variant=VARIANT, epochs=-1):
 	project_dir = Path(__file__).resolve().parent
 	save_path = save_path_ or project_dir / "trained" / "final_BiGRU.pth"
 	data_dir = project_dir / "data" / (variant or "geometric")
@@ -283,7 +294,7 @@ def main(train_path_=None, validation_path_=None, test_path_=None, save_path_=No
 		model,
 		train_dataloader,
 		checkpoint_path=save_path.with_stem(save_path.stem.replace("final_", "")),
-		epochs=200,
+		epochs=epochs,
 		validation_dataloader=validation_dataloader,
 		gradient_clip=0.5,
 		use_amp=True)

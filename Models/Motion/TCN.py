@@ -338,9 +338,3 @@ def main(train_path_=None, validation_path_=None, test_path_=None, save_path_=No
 
 if __name__ == "__main__":
 	main()
-
-# TODO: the loss of of the 3d model is half of 3d-raw, and yet the character accuracy of 3d-raw is ~.5 higher
-# What's going on there
-# Also why are they both so low?
-#
-# Overfitting may be happening
