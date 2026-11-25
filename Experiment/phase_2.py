@@ -134,7 +134,7 @@ class Phase2:
 			if self.raw_text:
 				self.dropped_chars[-1] = True
 				self.tk_typed_text.set(self.display_text)
-				self.keyboard_log.append((str(dt.datetime.now().time()), "backspace"))
+				self.keyboard_log.append((str(dt.datetime.now().time()), "-"))
 
 		def on_keyboard(event: tk.Event) -> None:
 			if event.char == "\t":
@@ -146,6 +146,7 @@ class Phase2:
 				self.tk_typed_text.set(self.display_text)
 				
 
+		# TODO: Should do flat, curved, and traditional keyboard
 		current_quote = None
 		start_time = dt.datetime.now()
 		end_time = dt.datetime.now() + dt.timedelta(seconds=self.duration_seconds)
