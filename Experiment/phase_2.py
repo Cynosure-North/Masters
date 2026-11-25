@@ -63,6 +63,7 @@ class Phase2:
 		result = {
 			"quote": quote,
 			"time_taken": time_taken,
+			"final_text": self.display_text,
 			"keyboard_log": self.keyboard_log,
 			"frame_file_path": None }
 
@@ -92,9 +93,6 @@ class Phase2:
 			if now >= end_time:
 				end_of_experiment()
 			else:
-				# TODO: Write parsing code now
-				#  I recall they standardised on a word being 5 chars + space
-				#  Should wpm be based on the text typed or on the target text?
 				if current_quote is not None:
 					self._finish_quote(current_quote, time_taken)
 
@@ -136,12 +134,12 @@ class Phase2:
 			if self.raw_text:
 				self.dropped_chars[-1] = True
 				self.tk_typed_text.set(self.display_text)
+				self.keyboard_log.append((str(dt.datetime.now().time()), "backspace"))
 
 		def on_keyboard(event: tk.Event) -> None:
-			# if event.char.isalpha() and self.stage == "keyboard":
 			if event.char == "\t":
 				next_quote()
-			elif event.char.isalpha():
+			elif event.char.isalpha() or event.char == " ":
 				self.keyboard_log.append((str(dt.datetime.now().time()), event.char))
 
 				self.raw_text.append(event.char)
@@ -155,8 +153,8 @@ class Phase2:
 		window = tk.Tk()
 		window.attributes('-fullscreen', True)
 		target_text = tk.Label(window, text="Press the left pedal button when you're ready to start",
-		                       font=("Helvetica", 64, "bold"), wraplength=1500,
-		                       highlightbackground="red", highlightthickness=20)
+								font=("Helvetica", 64, "bold"), wraplength=1500,
+								highlightbackground="red", highlightthickness=20)
 		typed_text = tk.Label(window, textvariable=self.tk_typed_text, font=("Helvetica", 64, "bold"), wraplength=1500)
 		target_text.pack(expand=True)
 		typed_text.pack(expand=True)

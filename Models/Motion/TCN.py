@@ -284,7 +284,8 @@ def test_model(model, dataloader):
 def main(train_path_=None, validation_path_=None, test_path_=None, save_path_=None, variant=VARIANT, epochs=-1):
 	project_dir = Path(__file__).resolve().parent
 	save_path = save_path_ or project_dir / "trained" / "best_TCN.pth"
-	data_dir = project_dir / "data" / variant
+	# data_dir = project_dir / "data" / variant
+	data_dir = project_dir / "data" / "3d-raw_no-diff"
 	train_path = train_path_ or data_dir / "train"
 	validation_path = validation_path_ or data_dir / "validation"
 	test_path = test_path_ or data_dir / "test"
